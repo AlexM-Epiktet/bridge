@@ -51,8 +51,18 @@ correctness exists to prevent.
   consistency.
 - New iron law: never infer a token from a raw value.
 
+- **Variant wiring.** For a component set, `code` diffs the variant subtrees:
+  classes shared by every variant stay static, the rest move into a
+  module-scope lookup table selected by a `computed()` keyed on the axis
+  inputs. Variants whose structure differs from the reference are reported
+  rather than mis-wired.
+
 ### Fixed
 
+- **A component set emitted every variant side by side**, because the set's
+  children were treated as template content. A set is not renderable — one
+  Angular component covers the whole matrix — so the template is built from the
+  default variant and the axes become inputs.
 - **Text-style extraction produced placeholder metrics.** `extractTextStylesFromFigma`
   hardcoded `Inter / Regular / 14 / 20` for every style, because `/styles`
   carries no typography data. It now batch-fetches the defining nodes and reads
