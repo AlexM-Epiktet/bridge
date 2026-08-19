@@ -2,7 +2,9 @@
 
 ## Reporting vulnerabilities
 
-If you discover a security vulnerability in Bridge, please **do not** open a public issue. Instead, email the maintainer directly: https://github.com/noemuch (follow the contact link in the profile).
+If you discover a security vulnerability in this fork, please **do not** open a public issue. Instead, report it privately to the Kinougarde maintainers via [GitHub Security Advisories](https://github.com/kinougarde/bridge/security/advisories/new).
+
+Vulnerabilities inherited from upstream should also be reported to [noemuch/bridge](https://github.com/noemuch/bridge).
 
 We aim to acknowledge reports within 48 hours and ship a fix within 7 days for critical issues.
 

@@ -1,19 +1,19 @@
 {
-  "name": "epiktet-plugins",
-  "description": "Epiktet plugin marketplace. Ships Bridge DS — compiler-driven design generation in Figma. Fork of noemuch/bridge.",
+  "name": "kinougarde-plugins",
+  "description": "Kinougarde plugin marketplace. Ships Bridge DS — compiler-driven design generation in Figma. Fork of noemuch/bridge.",
   "owner": {
-    "name": "MOULAY Alexandre",
-    "url": "https://github.com/AlexM-Epiktet"
+    "name": "Kinougarde",
+    "url": "https://github.com/kinougarde"
   },
   "plugins": [
     {
       "name": "bridge-ds",
       "description": "Compiler-driven design generation in Figma — 100% design system compliant.",
-      "version": "7.5.0",
+      "version": "7.5.1",
       "source": "./",
       "author": {
         "name": "MOULAY Alexandre",
-        "url": "https://github.com/AlexM-Epiktet"
+        "url": "https://github.com/kinougarde"
       }
     }
   ]

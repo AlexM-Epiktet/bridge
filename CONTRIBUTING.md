@@ -67,8 +67,8 @@ Key entry points:
 
 ## Community
 
-- [Discussions](https://github.com/noemuch/bridge/discussions) — questions, ideas, show & tell
-- [Issues](https://github.com/noemuch/bridge/issues) — bug reports, feature requests
+- [Discussions](https://github.com/kinougarde/bridge/discussions) — questions, ideas, show & tell
+- [Issues](https://github.com/kinougarde/bridge/issues) — bug reports, feature requests
 
 ## Code of Conduct
 
