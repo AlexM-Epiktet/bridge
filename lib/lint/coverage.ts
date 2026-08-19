@@ -1,5 +1,5 @@
 // lib/lint/coverage.ts
-import type { Category } from "@noemuch/bridge-ds-rule-api";
+import type { Category } from "@kinougarde/bridge-ds-rule-api";
 import type { CoverageReport, RuleDef, LintDiagnostic } from "./types.js";
 
 const ALL_CATEGORIES: Category[] = [

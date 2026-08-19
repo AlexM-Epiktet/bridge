@@ -13,7 +13,7 @@ export async function doctor(version = "6.0.0") {
   } catch {
     console.log(`  ${icons.fail} Not a git repo`);
   }
-  console.log(`  ${icons.pass} @noemuch/bridge-ds ${version}`);
+  console.log(`  ${icons.pass} @kinougarde/bridge-ds ${version}`);
 
   console.log(brand("Configuration"));
   try {

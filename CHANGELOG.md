@@ -18,17 +18,18 @@ All notable changes to Bridge DS are documented here.
   Kinougarde maintainers via GitHub Security Advisories, with inherited
   vulnerabilities also directed upstream.
 
-### Not changed (deliberately)
+- **npm scope renamed** `@noemuch/bridge-ds` → **`@kinougarde/bridge-ds`**
+  (and `@noemuch/bridge-ds-rule-api` → `@kinougarde/bridge-ds-rule-api`).
+  Nothing was installed under the old name, so this costs nothing now and
+  stops the fork from pointing at a package that ships different code:
+  `npm i @noemuch/bridge-ds` installs upstream's build, not this one.
 
-- **The npm package is still `@noemuch/bridge-ds`.** Renaming the scope would
-  break every install path until the fork is published under a scope this org
-  owns. See the release note below before rolling out.
-
-> **Rollout caveat.** `setup bridge` generates a cron workflow pinned to
-> `npx -y @noemuch/bridge-ds@<VERSION>` (`lib/cli/setup-orchestrator.ts`).
-> Upstream npm has no 7.5.x, so that generated workflow 404s until either the
-> fork is published under its own scope or the cron pin is changed to a
-> version that exists upstream.
+> **Rollout caveat (open).** `setup bridge` generates a consumer cron workflow
+> pinned to `npx -y @kinougarde/bridge-ds@<VERSION>`
+> (`lib/cli/setup-orchestrator.ts`). That package is not published yet, so the
+> generated workflow 404s until the fork is published under this scope. The
+> plugin ships the skills directly, so `make` / `make mockup` are unaffected —
+> only the generated cron is. Publishing is deliberately deferred.
 
 ## [7.5.0] — 2026-08-19
 

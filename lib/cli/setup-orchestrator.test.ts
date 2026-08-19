@@ -81,7 +81,7 @@ test("scaffold produces a cron workflow with the daily schedule", async () => {
     assert.match(yml, /Bridge KB — Daily Sync/);
     assert.match(yml, /schedule:\s*-\s*cron: "0 6 \* \* \*"/);
     assert.match(yml, /secrets\.FIGMA_TOKEN/);
-    assert.match(yml, /npx -y @noemuch\/bridge-ds@/);
+    assert.match(yml, /npx -y @kinougarde\/bridge-ds@/);
   });
 });
 

@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <a href="https://www.npmjs.com/package/@noemuch/bridge-ds"><img src="https://img.shields.io/npm/v/@noemuch/bridge-ds?color=0183ff" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@kinougarde/bridge-ds"><img src="https://img.shields.io/npm/v/@kinougarde/bridge-ds?color=0183ff" alt="npm version" /></a>
   <a href="https://github.com/kinougarde/bridge/stargazers"><img src="https://img.shields.io/github/stars/kinougarde/bridge?color=0183ff" alt="Stars" /></a>
   <a href="https://github.com/kinougarde/bridge/actions"><img src="https://github.com/kinougarde/bridge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>

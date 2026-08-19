@@ -3,7 +3,7 @@ import { Spectral, Document } from "@stoplight/spectral-core";
 import * as functions from "@stoplight/spectral-functions";
 import { Json as JsonParser } from "@stoplight/spectral-parsers";
 import type { RuleDef, LintDiagnostic, LintResult } from "./types.js";
-import type { Category, Severity } from "@noemuch/bridge-ds-rule-api";
+import type { Category, Severity } from "@kinougarde/bridge-ds-rule-api";
 import { buildBridgeBuiltinFunctions } from "./builtin-functions.js";
 import type { LoadedFunction } from "./load-custom-functions.js";
 

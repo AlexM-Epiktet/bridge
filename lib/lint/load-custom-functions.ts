@@ -10,7 +10,7 @@
 import { readdir, access } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { BridgeFunctionDefinition } from "@noemuch/bridge-ds-rule-api";
+import type { BridgeFunctionDefinition } from "@kinougarde/bridge-ds-rule-api";
 
 export type LoadedFunction = { name: string; fn: (...args: unknown[]) => unknown };
 

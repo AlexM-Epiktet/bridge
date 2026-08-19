@@ -29,12 +29,12 @@ Bridge requires a Figma Personal Access Token (`FIGMA_TOKEN`) to extract design-
 
 ## Supply chain
 
-`@noemuch/bridge-ds` is published to npm with `--access public`.
+`@kinougarde/bridge-ds` is published to npm with `--access public`.
 
 **User mitigation:** Pin Bridge versions in your cron workflow:
 
 ```yaml
-- run: npx -y @noemuch/bridge-ds@6.0.0 cron --config docs.config.yaml
+- run: npx -y @kinougarde/bridge-ds@6.0.0 cron --config docs.config.yaml
 ```
 
 **CI considerations:** The `bridge-kb-cron.yml` workflow runs inside GitHub Actions with access to `FIGMA_TOKEN`. Scope this secret to that workflow file only; do not add it to other workflows.

@@ -47,7 +47,7 @@ export async function migrate(opts: MigrateOptions): Promise<MigrateResult> {
   const shape = await detectShape(opts.kbPath);
   if (shape === "newer") {
     throw new KBSchemaError(
-      `KB schema is newer than this CLI supports (max ${CURRENT_KB_SCHEMA_VERSION}). Upgrade @noemuch/bridge-ds.`,
+      `KB schema is newer than this CLI supports (max ${CURRENT_KB_SCHEMA_VERSION}). Upgrade @kinougarde/bridge-ds.`,
       "newer"
     );
   }

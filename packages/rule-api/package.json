@@ -1,5 +1,5 @@
 {
-  "name": "@noemuch/bridge-ds-rule-api",
+  "name": "@kinougarde/bridge-ds-rule-api",
   "version": "1.0.0",
   "description": "Frozen public API for authoring Bridge DS custom lint rules.",
   "license": "MIT",
