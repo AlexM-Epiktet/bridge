@@ -1,13 +1,13 @@
 {
   "name": "bridge-ds",
   "displayName": "Bridge Design System",
-  "version": "7.4.0",
+  "version": "7.5.0",
   "description": "Compiler-driven design generation in Figma — declarative scene graphs compiled into DS-native Figma designs.",
   "author": {
-    "name": "noemuch"
+    "name": "MOULAY Alexandre"
   },
-  "homepage": "https://github.com/noemuch/bridge",
-  "repository": "https://github.com/noemuch/bridge",
+  "homepage": "https://github.com/AlexM-Epiktet/bridge",
+  "repository": "https://github.com/AlexM-Epiktet/bridge",
   "license": "MIT",
   "keywords": [
     "figma",

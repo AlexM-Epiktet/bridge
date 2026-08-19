@@ -2,6 +2,36 @@
 
 All notable changes to Bridge DS are documented here.
 
+## [7.5.0] — 2026-08-19
+
+### Added
+
+- **`make mockup` — desktop-fold preset.** Generates a full-page mockup at
+  **1920x945**: the real Chrome viewport of a 1920x1080 Windows user (1080
+  minus ~87px of browser UI and 48px of taskbar). The browser is never drawn —
+  the root frame *is* the viewport. The height is fixed on purpose: the mockup
+  is an above-the-fold audit, so content overflowing 945px is a design signal
+  to surface rather than an error to hide. Routed from `using-bridge` on
+  "make mockup" / "mockup" / "maquette"; implemented as Phase C0b of
+  `generating-figma-design`, plus a `desktop-fold` canvas in the screen CSpec
+  template.
+
+  The mode carries one hard rule: **compose the app shell from DS parts,
+  never INSTANCE a shell master whose content area is a SLOT property.** The
+  compiler has no SLOT support, so such an instance cannot be filled. A
+  consuming project supplies its own shell composition as a `mockup`-archetype
+  recipe, which Phase B matches so the section map only has to fill the
+  content zone.
+
+### Changed
+
+- **Plugin manifests carry this fork's identity** (`.claude-plugin/`,
+  `.cursor-plugin/`): marketplace renamed `bridge-ds-dev` → `epiktet-plugins`,
+  owner/author/homepage/repository point at `AlexM-Epiktet/bridge`. The
+  marketplace name is the identifier users type (`bridge-ds@epiktet-plugins`),
+  so it is settled before rollout rather than after. Upstream attribution is
+  kept in the marketplace description and the unchanged MIT LICENSE.
+
 ## [7.4.0] — 2026-08-19
 
 Bridge becomes bidirectional. Four independent increments: code generation from
