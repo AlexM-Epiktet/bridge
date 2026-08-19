@@ -1,19 +1,19 @@
 {
-  "name": "bridge-ds-dev",
-  "description": "Development marketplace for Bridge DS — local install via /plugin marketplace add <path>.",
+  "name": "epiktet-plugins",
+  "description": "Epiktet plugin marketplace. Ships Bridge DS — compiler-driven design generation in Figma. Fork of noemuch/bridge.",
   "owner": {
-    "name": "noemuch",
-    "url": "https://github.com/noemuch"
+    "name": "MOULAY Alexandre",
+    "url": "https://github.com/AlexM-Epiktet"
   },
   "plugins": [
     {
       "name": "bridge-ds",
       "description": "Compiler-driven design generation in Figma — 100% design system compliant. Compiles component specs into verified Figma output via MCP.",
-      "version": "7.4.0",
+      "version": "7.5.0",
       "source": "./",
       "author": {
-        "name": "noemuch",
-        "url": "https://github.com/noemuch"
+        "name": "MOULAY Alexandre",
+        "url": "https://github.com/AlexM-Epiktet"
       }
     }
   ]
