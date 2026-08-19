@@ -31,6 +31,8 @@ const TYPE_PREFIX: Record<string, string> = {
   CLONE: "clone",
   RECTANGLE: "rect",
   ELLIPSE: "ellipse",
+  COMPONENT: "comp",
+  COMPONENT_SET: "compset",
 };
 
 /**
@@ -164,6 +166,30 @@ function emitFrame(
   lines.push("var " + varName + " = figma.createFrame();");
   lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Frame") + ";");
 
+  emitContainerBody(node, varName, importNames, lines);
+
+  // Rule 1: appendChild FIRST, then FILL sizing
+  lines.push(parentVar + ".appendChild(" + varName + ");");
+  emitFillSizing(node, varName, lines);
+
+  // Rule 2: absolute positioning AFTER appendChild
+  emitAbsolute(node, varName, lines);
+}
+
+/**
+ * Emit everything a container node carries between creation and appendChild:
+ * layout, size, alignment, spacing, decoration and visibility.
+ *
+ * Shared by FRAME and COMPONENT — a master component is structurally a frame,
+ * and the Figma API rules about ordering (resize before sizing modes, bind
+ * variables rather than assign values) apply identically to both.
+ */
+function emitContainerBody(
+  node: ResolvedNode,
+  varName: string,
+  importNames: Map<string, string>,
+  lines: string[]
+): void {
   // Layout mode
   if (node.layout && node.layout !== "NONE") {
     lines.push(varName + ".layoutMode = " + JSON.stringify(node.layout) + ";");
@@ -231,13 +257,6 @@ function emitFrame(
   }
 
   emitVisibility(node, varName, lines);
-
-  // Rule 1: appendChild FIRST, then FILL sizing
-  lines.push(parentVar + ".appendChild(" + varName + ");");
-  emitFillSizing(node, varName, lines);
-
-  // Rule 2: absolute positioning AFTER appendChild
-  emitAbsolute(node, varName, lines);
 }
 
 function emitText(
@@ -465,6 +484,215 @@ function emitEllipse(
   emitFillSizing(node, varName, lines);
 
   emitAbsolute(node, varName, lines);
+}
+
+// ---------------------------------------------------------------------------
+// MASTER COMPONENT EMITTERS
+// ---------------------------------------------------------------------------
+
+/**
+ * Variant node names are the matrix coordinates Figma stores a component set
+ * by: `prop=value, prop2=value2`. The order follows the axis declaration on
+ * the set, not the authoring order of `variantValues`, so the same variant
+ * always produces the same name.
+ */
+function variantName(
+  variantValues: Record<string, string> | undefined,
+  axisOrder: readonly string[]
+): string | null {
+  if (!variantValues) return null;
+  const parts = axisOrder
+    .filter((axis) => variantValues[axis] !== undefined)
+    .map((axis) => axis + "=" + variantValues[axis]);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
+ * Emit a master component. `explicitName` overrides the node name, which the
+ * component-set path uses to impose the `prop=value` variant naming.
+ */
+function emitComponent(
+  node: ResolvedNode,
+  parentVar: string,
+  varName: string,
+  importNames: Map<string, string>,
+  counters: Map<string, number>,
+  localRefs: Map<string, string>,
+  lines: string[],
+  explicitName?: string
+): void {
+  lines.push("var " + varName + " = figma.createComponent();");
+  lines.push(varName + ".name = " + JSON.stringify(explicitName ?? node.name ?? "Component") + ";");
+
+  emitContainerBody(node, varName, importNames, lines);
+
+  if (node.description) {
+    lines.push(varName + ".description = " + JSON.stringify(node.description) + ";");
+  }
+
+  lines.push(parentVar + ".appendChild(" + varName + ");");
+  emitFillSizing(node, varName, lines);
+  emitAbsolute(node, varName, lines);
+
+  if (Array.isArray(node.children) && node.children.length > 0) {
+    walkAndEmit(node.children, varName, importNames, counters, localRefs, lines);
+  }
+}
+
+/**
+ * Emit the `addComponentProperty` calls for a master, plus the layer bindings
+ * that make each property actually drive something.
+ *
+ * Figma returns a suffixed key (`label#12:3`) from `addComponentProperty`, and
+ * `componentPropertyReferences` must use that exact key — hence the round-trip
+ * through a local variable rather than reusing the plain property name.
+ */
+function emitComponentProperties(
+  node: ResolvedNode,
+  ownerVar: string,
+  bindTargetVar: string,
+  lines: string[]
+): void {
+  const props = node.componentProperties;
+  if (!Array.isArray(props) || props.length === 0) return;
+
+  for (const prop of props) {
+    if (!prop || !prop.name || !prop.type) continue;
+
+    const keyVar = "cp_" + ownerVar + "_" + prop.name.replace(/[^a-zA-Z0-9]/g, "_");
+    const defaultValue =
+      prop.default !== undefined
+        ? JSON.stringify(prop.default)
+        : prop.type === "BOOLEAN"
+          ? "true"
+          : '""';
+
+    lines.push(
+      "var " +
+        keyVar +
+        " = " +
+        ownerVar +
+        ".addComponentProperty(" +
+        JSON.stringify(prop.name) +
+        ", " +
+        JSON.stringify(prop.type) +
+        ", " +
+        defaultValue +
+        ");"
+    );
+
+    if (!prop.bindTo || !prop.bindTo.layer) continue;
+
+    // Default the driven aspect from the property type: a TEXT property drives
+    // characters, a BOOLEAN drives visibility, an INSTANCE_SWAP drives the
+    // nested main component.
+    const field =
+      prop.bindTo.field ??
+      (prop.type === "TEXT" ? "characters" : prop.type === "BOOLEAN" ? "visible" : "mainComponent");
+
+    const targetVar = "bt_" + keyVar;
+    lines.push(
+      "var " +
+        targetVar +
+        " = " +
+        bindTargetVar +
+        ".findOne(function(n) { return n.name === " +
+        JSON.stringify(prop.bindTo.layer) +
+        "; });"
+    );
+    lines.push(
+      "if (" +
+        targetVar +
+        ") " +
+        targetVar +
+        ".componentPropertyReferences = { " +
+        field +
+        ": " +
+        keyVar +
+        " };"
+    );
+    lines.push(
+      "else console.warn('bridge: property " +
+        prop.name.replace(/'/g, "\\'") +
+        " has no layer named " +
+        prop.bindTo.layer.replace(/'/g, "\\'") +
+        "');"
+    );
+  }
+}
+
+/**
+ * Emit a component set: every variant as its own master, then a single
+ * `combineAsVariants` call.
+ *
+ * Ordering is forced by the Figma API — the components must exist and be
+ * parented before they can be combined, and the set does not exist as a node
+ * until the combine returns, so its name, description and properties can only
+ * be set afterwards.
+ */
+function emitComponentSet(
+  node: ResolvedNode,
+  parentVar: string,
+  varName: string,
+  importNames: Map<string, string>,
+  counters: Map<string, number>,
+  localRefs: Map<string, string>,
+  lines: string[]
+): void {
+  const axes = Array.isArray(node.variantProperties) ? node.variantProperties : [];
+  const axisOrder = axes.map((a) => a.name);
+  const children = Array.isArray(node.children) ? node.children : [];
+
+  if (children.length === 0) {
+    lines.push('// WARN: COMPONENT_SET "' + (node.name ?? "?") + '" has no variants');
+    return;
+  }
+
+  const variantVars: string[] = [];
+
+  for (const child of children) {
+    if (!child || child.type !== "COMPONENT") continue;
+    const childVar = safeNodeVar("COMPONENT", child.name, counters);
+    variantVars.push(childVar);
+    if (child.id) localRefs.set(child.id, childVar);
+
+    emitComponent(
+      child,
+      parentVar,
+      childVar,
+      importNames,
+      counters,
+      localRefs,
+      lines,
+      variantName(child.variantValues, axisOrder) ?? child.name
+    );
+  }
+
+  if (variantVars.length === 0) {
+    lines.push(
+      '// WARN: COMPONENT_SET "' + (node.name ?? "?") + '" produced no COMPONENT children'
+    );
+    return;
+  }
+
+  lines.push(
+    "var " +
+      varName +
+      " = figma.combineAsVariants([" +
+      variantVars.join(", ") +
+      "], " +
+      parentVar +
+      ");"
+  );
+  lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Component Set") + ";");
+
+  if (node.description) {
+    lines.push(varName + ".description = " + JSON.stringify(node.description) + ";");
+  }
+
+  // Non-variant properties live on the set; their layer bindings resolve
+  // against the first variant, which every variant shares by construction.
+  emitComponentProperties(node, varName, variantVars[0]!, lines);
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +982,15 @@ function walkAndEmit(
 
       case "ELLIPSE":
         emitEllipse(node, parentVar, varName, importNames, lines);
+        break;
+
+      case "COMPONENT":
+        emitComponent(node, parentVar, varName, importNames, counters, localRefs, lines);
+        emitComponentProperties(node, varName, varName, lines);
+        break;
+
+      case "COMPONENT_SET":
+        emitComponentSet(node, parentVar, varName, importNames, counters, localRefs, lines);
         break;
 
       default:

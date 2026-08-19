@@ -16,7 +16,12 @@ export const NODE_TYPES: readonly NodeType[] = [
   "ELLIPSE",
   "REPEAT",
   "CONDITIONAL",
+  "COMPONENT",
+  "COMPONENT_SET",
 ];
+
+const COMPONENT_PROPERTY_TYPES: readonly string[] = ["TEXT", "BOOLEAN", "INSTANCE_SWAP"];
+const BIND_FIELDS: readonly string[] = ["characters", "visible", "mainComponent"];
 
 // ─── Allowed enum values ──────────────────────────────────────────────────────
 
@@ -501,6 +506,191 @@ function validateConditional(node: RawNode, path: string): CompilerError[] {
   return errors;
 }
 
+/**
+ * Shared validator for the `componentProperties` array carried by COMPONENT
+ * and COMPONENT_SET nodes.
+ */
+function validateComponentProperties(node: RawNode, path: string, name: string): CompilerError[] {
+  const errors: CompilerError[] = [];
+  const props = node["componentProperties"];
+  if (props === undefined) return errors;
+
+  if (!Array.isArray(props)) {
+    errors.push(
+      new CompilerError("PARSE_MISSING_FIELD", {
+        message: 'Field "componentProperties" must be an array on node "' + name + '"',
+        node: name,
+        path: path + ".componentProperties",
+      })
+    );
+    return errors;
+  }
+
+  props.forEach((prop: unknown, i: number) => {
+    const pPath = path + ".componentProperties[" + i + "]";
+    const pName = field(prop, "name");
+    const pType = field(prop, "type");
+
+    if (!pName || typeof pName !== "string") {
+      errors.push(missingField("name", name, pPath));
+    }
+    if (!pType || typeof pType !== "string") {
+      errors.push(missingField("type", name, pPath));
+    } else if (COMPONENT_PROPERTY_TYPES.indexOf(pType) === -1) {
+      errors.push(invalidEnum("type", pType, COMPONENT_PROPERTY_TYPES, name, pPath));
+    }
+
+    const bindTo = field(prop, "bindTo");
+    if (bindTo !== undefined) {
+      if (!isObject(bindTo)) {
+        errors.push(
+          new CompilerError("PARSE_MISSING_FIELD", {
+            message: 'Field "bindTo" must be an object at ' + pPath,
+            node: name,
+            path: pPath + ".bindTo",
+          })
+        );
+      } else {
+        if (!bindTo["layer"] || typeof bindTo["layer"] !== "string") {
+          errors.push(missingField("layer", name, pPath + ".bindTo"));
+        }
+        const bField = bindTo["field"];
+        if (bField !== undefined && BIND_FIELDS.indexOf(String(bField)) === -1) {
+          errors.push(invalidEnum("field", bField, BIND_FIELDS, name, pPath + ".bindTo"));
+        }
+      }
+    }
+  });
+
+  return errors;
+}
+
+/**
+ * A COMPONENT is a master. Structurally it behaves like a FRAME — same layout,
+ * padding and fill vocabulary — so frame validation is reused wholesale.
+ */
+function validateComponent(node: RawNode, path: string): CompilerError[] {
+  const name = String(node["name"] ?? "");
+  const errors = validateFrame(node, path);
+
+  const variantValues = node["variantValues"];
+  if (variantValues !== undefined && !isObject(variantValues)) {
+    errors.push(
+      new CompilerError("PARSE_MISSING_FIELD", {
+        message: 'Field "variantValues" must be an object on node "' + name + '"',
+        node: name,
+        path: path + ".variantValues",
+      })
+    );
+  }
+
+  for (const e of validateComponentProperties(node, path, name)) errors.push(e);
+  return errors;
+}
+
+/**
+ * A COMPONENT_SET is a container of COMPONENT variants. It declares the axes,
+ * and every child must state its value on each of them.
+ */
+function validateComponentSet(node: RawNode, path: string): CompilerError[] {
+  const errors: CompilerError[] = [];
+  const name = String(node["name"] ?? "");
+
+  const axes = node["variantProperties"];
+  if (!Array.isArray(axes) || axes.length === 0) {
+    errors.push(missingField("variantProperties", name, path));
+  } else {
+    axes.forEach((axis: unknown, i: number) => {
+      const aPath = path + ".variantProperties[" + i + "]";
+      const aName = field(axis, "name");
+      const aValues = field(axis, "values");
+      if (!aName || typeof aName !== "string") {
+        errors.push(missingField("name", name, aPath));
+      }
+      if (!Array.isArray(aValues) || aValues.length === 0) {
+        errors.push(missingField("values", name, aPath));
+      }
+    });
+  }
+
+  const children = node["children"];
+  if (!Array.isArray(children) || children.length === 0) {
+    errors.push(missingField("children", name, path));
+    return errors;
+  }
+
+  const axisNames = Array.isArray(axes)
+    ? axes.map((a: unknown) => field(a, "name")).filter((n): n is string => typeof n === "string")
+    : [];
+
+  const seen = new Set<string>();
+
+  children.forEach((child: unknown, i: number) => {
+    const cPath = path + ".children[" + i + "]";
+
+    if (field(child, "type") !== "COMPONENT") {
+      errors.push(
+        new CompilerError("PARSE_UNKNOWN_NODE_TYPE", {
+          message:
+            'COMPONENT_SET "' +
+            name +
+            '" may only contain COMPONENT children, got "' +
+            String(field(child, "type")) +
+            '" at ' +
+            cPath,
+          node: name,
+          path: cPath + ".type",
+        })
+      );
+      return;
+    }
+
+    for (const ce of validateNode(child, cPath)) errors.push(ce);
+
+    // Every variant must pin every axis, otherwise Figma cannot place it in
+    // the matrix and silently produces a malformed set.
+    const values = field(child, "variantValues");
+    if (!isObject(values)) {
+      errors.push(missingField("variantValues", name, cPath));
+      return;
+    }
+    for (const axisName of axisNames) {
+      if (values[axisName] === undefined) {
+        errors.push(
+          new CompilerError("PARSE_MISSING_FIELD", {
+            message:
+              "Variant at " +
+              cPath +
+              ' is missing a value for axis "' +
+              axisName +
+              '" declared on COMPONENT_SET "' +
+              name +
+              '"',
+            node: name,
+            path: cPath + ".variantValues." + axisName,
+          })
+        );
+      }
+    }
+
+    const signature = axisNames.map((a) => a + "=" + String(values[a])).join(", ");
+    if (seen.has(signature)) {
+      errors.push(
+        new CompilerError("PARSE_MISSING_FIELD", {
+          message:
+            'COMPONENT_SET "' + name + '" has two variants with the same combination: ' + signature,
+          node: name,
+          path: cPath + ".variantValues",
+        })
+      );
+    }
+    seen.add(signature);
+  });
+
+  for (const e of validateComponentProperties(node, path, name)) errors.push(e);
+  return errors;
+}
+
 // ─── Node Dispatcher ──────────────────────────────────────────────────────────
 
 type TypeValidator = (node: RawNode, path: string) => CompilerError[];
@@ -514,6 +704,8 @@ const TYPE_VALIDATORS: Record<NodeType, TypeValidator> = {
   ELLIPSE: validateEllipse,
   REPEAT: validateRepeat,
   CONDITIONAL: validateConditional,
+  COMPONENT: validateComponent,
+  COMPONENT_SET: validateComponentSet,
 };
 
 /**

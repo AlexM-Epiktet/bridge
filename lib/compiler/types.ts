@@ -14,7 +14,38 @@ export type NodeType =
   | "RECTANGLE"
   | "ELLIPSE"
   | "REPEAT"
-  | "CONDITIONAL";
+  | "CONDITIONAL"
+  | "COMPONENT"
+  | "COMPONENT_SET";
+
+/** One axis of a component set: a property name and the values it can take. */
+export interface VariantProperty {
+  name: string;
+  values: string[];
+  default?: string;
+}
+
+/**
+ * A component property exposed on a master component (Figma's TEXT / BOOLEAN /
+ * INSTANCE_SWAP properties — VARIANT axes are declared separately via
+ * {@link VariantProperty}).
+ *
+ * `bindTo` wires the property to a descendant layer so overriding the property
+ * on an instance actually changes something. Without it the property exists but
+ * drives nothing, which is almost always an authoring mistake.
+ */
+export interface ComponentProperty {
+  name: string;
+  type: "TEXT" | "BOOLEAN" | "INSTANCE_SWAP";
+  default?: string | boolean;
+  description?: string;
+  bindTo?: {
+    /** Name of the descendant layer the property drives. */
+    layer: string;
+    /** Which aspect of that layer the property drives. Inferred from `type` when omitted. */
+    field?: "characters" | "visible" | "mainComponent";
+  };
+}
 
 export interface FontSpec {
   family: string;
@@ -100,6 +131,15 @@ export interface SceneNode {
   // CONDITIONAL
   when?: string;
   else?: SceneNode[];
+
+  // COMPONENT_SET — the variant axes the set is combined along.
+  variantProperties?: VariantProperty[];
+  // COMPONENT — the value this variant takes on each axis, e.g. {variant: "primary"}.
+  variantValues?: Record<string, string>;
+  // COMPONENT / COMPONENT_SET — exposed TEXT / BOOLEAN / INSTANCE_SWAP properties.
+  componentProperties?: ComponentProperty[];
+  /** COMPONENT / COMPONENT_SET — published description. */
+  description?: string;
 
   // Children (FRAME, CONDITIONAL, REPEAT template items...)
   children?: SceneNode[];
