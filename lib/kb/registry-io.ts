@@ -86,3 +86,78 @@ export async function readTextStyleRegistry(file: string): Promise<TextStyleRegi
 export async function writeRegistry(file: string, data: unknown): Promise<void> {
   await writeFile(file, JSON.stringify(data, null, 2) + "\n", "utf8");
 }
+
+// ---------------------------------------------------------------------------
+// Local component registration
+// ---------------------------------------------------------------------------
+
+/**
+ * A component created by Bridge rather than discovered in Figma.
+ *
+ * `properties` uses the **string-encoded** shape (`VARIANT(a,b,c)`, `"TEXT"`,
+ * `"BOOLEAN"`, `"INSTANCE_SWAP"`) rather than the array shape declared on
+ * {@link ComponentEntry}. That is deliberate: `lib/compiler/registry.ts` drops
+ * array-shaped `properties` at read time, which silently disables variant
+ * validation. The encoded record is the only shape the compiler actually
+ * consumes.
+ *
+ * `source: "local"` marks the entry as not-yet-published, so the cron can
+ * preserve it instead of overwriting it with a REST result that cannot
+ * possibly contain it.
+ */
+export interface LocalComponentEntry {
+  key: string;
+  name: string;
+  type: "COMPONENT" | "COMPONENT_SET";
+  category?: string;
+  properties: Record<string, string>;
+  variantCount?: number;
+  description?: string;
+  source: "local";
+  registeredAt: string;
+}
+
+/** Encode a variant axis the way the compiler's variant validator reads it. */
+export function encodeVariantAxis(values: readonly string[]): string {
+  return `VARIANT(${values.join(",")})`;
+}
+
+/**
+ * Insert or replace a component in `components.json`, matching on `key` first
+ * and on `name` second.
+ *
+ * The name fallback matters because a component re-created in Figma gets a new
+ * key while keeping its name; without it the registry would accumulate a stale
+ * duplicate that `resolve()` could pick over the live one.
+ *
+ * Reads and rewrites the whole file — there is no partial-write path, and the
+ * registries are small enough that a full rewrite is the simpler contract.
+ */
+export async function upsertComponentEntry(
+  file: string,
+  entry: LocalComponentEntry
+): Promise<{ action: "inserted" | "replaced"; total: number }> {
+  let registry: ComponentRegistry;
+  try {
+    registry = await readComponentRegistry(file);
+  } catch {
+    registry = { version: 1, generatedAt: new Date().toISOString(), components: [] };
+  }
+
+  const components = registry.components as unknown as Array<Record<string, unknown>>;
+  const existing = components.findIndex(
+    (c) => c.key === entry.key || (typeof c.name === "string" && c.name === entry.name)
+  );
+
+  const action = existing >= 0 ? "replaced" : "inserted";
+  if (existing >= 0) {
+    components.splice(existing, 1, entry as unknown as Record<string, unknown>);
+  } else {
+    components.push(entry as unknown as Record<string, unknown>);
+  }
+
+  registry.generatedAt = new Date().toISOString();
+  await writeRegistry(file, registry);
+
+  return { action, total: components.length };
+}
