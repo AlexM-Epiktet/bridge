@@ -1,13 +1,13 @@
 {
   "name": "bridge-ds",
-  "version": "7.5.0",
+  "version": "7.5.1",
   "description": "Compiler-driven design generation in Figma — 100% design system compliant. Compiles component specs into verified Figma output via MCP.",
   "author": {
     "name": "MOULAY Alexandre",
-    "url": "https://github.com/AlexM-Epiktet"
+    "url": "https://github.com/kinougarde"
   },
-  "homepage": "https://github.com/AlexM-Epiktet/bridge",
-  "repository": "https://github.com/AlexM-Epiktet/bridge",
+  "homepage": "https://github.com/kinougarde/bridge",
+  "repository": "https://github.com/kinougarde/bridge",
   "license": "MIT",
   "keywords": [
     "figma",

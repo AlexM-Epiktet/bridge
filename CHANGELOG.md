@@ -2,6 +2,34 @@
 
 All notable changes to Bridge DS are documented here.
 
+## [7.5.1] — 2026-08-19
+
+### Changed
+
+- **Repo moved to the Kinougarde organisation** (`kinougarde/bridge`). The
+  marketplace is renamed `epiktet-plugins` → **`kinougarde-plugins`**, so the
+  install identifier is now `bridge-ds@kinougarde-plugins`. Owner, author,
+  homepage and repository URLs updated across both plugin manifests,
+  `package.json`, README, CONTRIBUTING and SECURITY.
+- **README, CONTRIBUTING and SECURITY point at this fork.** Stars/CI badges,
+  Discussions and Issues links target `kinougarde/bridge`; the quick-start
+  installs from `kinougarde/bridge`. A fork notice credits upstream
+  `noemuch/bridge` in the header, and security reports now route to the
+  Kinougarde maintainers via GitHub Security Advisories, with inherited
+  vulnerabilities also directed upstream.
+
+### Not changed (deliberately)
+
+- **The npm package is still `@noemuch/bridge-ds`.** Renaming the scope would
+  break every install path until the fork is published under a scope this org
+  owns. See the release note below before rolling out.
+
+> **Rollout caveat.** `setup bridge` generates a cron workflow pinned to
+> `npx -y @noemuch/bridge-ds@<VERSION>` (`lib/cli/setup-orchestrator.ts`).
+> Upstream npm has no 7.5.x, so that generated workflow 404s until either the
+> fork is published under its own scope or the cron pin is changed to a
+> version that exists upstream.
+
 ## [7.5.0] — 2026-08-19
 
 ### Added

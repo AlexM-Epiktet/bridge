@@ -10,14 +10,18 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://www.npmjs.com/package/@noemuch/bridge-ds"><img src="https://img.shields.io/npm/v/@noemuch/bridge-ds?color=0183ff" alt="npm version" /></a>
-  <a href="https://github.com/noemuch/bridge/stargazers"><img src="https://img.shields.io/github/stars/noemuch/bridge?color=0183ff" alt="Stars" /></a>
-  <a href="https://github.com/noemuch/bridge/actions"><img src="https://github.com/noemuch/bridge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/kinougarde/bridge/stargazers"><img src="https://img.shields.io/github/stars/kinougarde/bridge?color=0183ff" alt="Stars" /></a>
+  <a href="https://github.com/kinougarde/bridge/actions"><img src="https://github.com/kinougarde/bridge/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
 
 <div align="center">
 
-[Discussions](https://github.com/noemuch/bridge/discussions) · [Issues](https://github.com/noemuch/bridge/issues) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+[Discussions](https://github.com/kinougarde/bridge/discussions) · [Issues](https://github.com/kinougarde/bridge/issues) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
+</div>
+
+<div align="center">
+<sub>Kinougarde fork of <a href="https://github.com/noemuch/bridge">noemuch/bridge</a> · distributed to the org as the <code>bridge-ds@kinougarde-plugins</code> plugin</sub>
 </div>
 
 <br />
@@ -63,8 +67,8 @@ The KB lives in your repo at `bridge-ds/knowledge-base/registries/`. Point your 
 **In Claude Code, any session (one-time install):**
 
 ```
-/plugin marketplace add noemuch/bridge
-/plugin install bridge-ds
+/plugin marketplace add kinougarde/bridge
+/plugin install bridge-ds@kinougarde-plugins
 ```
 
 **In your DS repo:**

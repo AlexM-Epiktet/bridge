@@ -1,6 +1,6 @@
 {
   "name": "@noemuch/bridge-ds",
-  "version": "7.5.0",
+  "version": "7.5.1",
   "description": "Compiler-driven design generation in Figma — 100% design system compliant. Compiles component specs into verified Figma output via MCP.",
   "main": "dist/lib/cli/main.js",
   "types": "dist/lib/cli/main.d.ts",
@@ -70,13 +70,13 @@
     "claude-code-plugin",
     "cursor-plugin"
   ],
-  "author": "noemuch",
+  "author": "Kinougarde",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/noemuch/bridge.git"
+    "url": "https://github.com/kinougarde/bridge.git"
   },
-  "homepage": "https://github.com/noemuch/bridge",
+  "homepage": "https://github.com/kinougarde/bridge",
   "dependencies": {
     "@stoplight/spectral-core": "^1.22.0",
     "@stoplight/spectral-functions": "^1.10.2",
