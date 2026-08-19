@@ -158,6 +158,27 @@ Report the section map before C1:
     SECTIONS:
       {Section} → {exact: Component(variant) | compose | new: name}
 
+### C0b. Mockup mode (`make mockup`)
+
+When the user asks for a **mockup** (`make mockup <description>`, "maquette"),
+apply the desktop-fold preset on top of the normal screen flow:
+
+- **Canvas: `desktop-fold` — 1920 x 945, fixed height.** This is the real
+  viewport of a 1920x1080 user in Chrome on Windows: 1080 minus ~87px of
+  browser UI (tab strip + omnibox) minus 48px of taskbar. The browser itself
+  is NOT drawn — the root frame IS the viewport.
+- **Fixed height = above-the-fold audit.** The mockup shows exactly what the
+  user sees without scrolling. Content overflowing 945px is a design signal
+  to surface, not an error to hide.
+- **Compose the app shell from DS parts — never INSTANCE a shell master
+  whose content area is a SLOT property.** The compiler has no SLOT support,
+  so instancing such a master produces a shell that cannot be filled. Build
+  the shell structure as a FRAME of DS INSTANCEs (rail, nav, header) plus a
+  fillH/fillV content frame, mirroring the master's geometry.
+- **Recipe first.** If the KB has a recipe with `archetype: mockup`, it
+  encodes the project's shell composition — Phase B should match it and the
+  section map only has to fill the content zone.
+
 ### C1. Generate CSpec YAML
 
 Choose the appropriate template:
@@ -227,7 +248,7 @@ Show a **readable summary** of the CSpec (NOT raw YAML). Format as a plan tree:
 ```
 PLAN: {name}
 Mode: {screen | component}
-Canvas: {1440px (web) | 390px (mobile) | 1024px (tablet)}
+Canvas: {1440px (web) | 390px (mobile) | 1024px (tablet) | 1920x945 (desktop-fold)}
 Recipe: {recipe name or "from scratch"}
 Learnings: {n} applied
 KB age: {N}d{ ⚠ stale — consider `setup` if > 30d}

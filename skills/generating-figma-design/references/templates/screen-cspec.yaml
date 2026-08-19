@@ -18,9 +18,9 @@
 meta:
   name: ""                    # Screen name, PascalCase (e.g. "SettingsPage")
   type: screen                # Always "screen" for screen specs
-  canvas: web                 # Target canvas: web | mobile | tablet
-  width: 1440                 # Root frame width in px
-  height: 900                 # Root frame height in px
+  canvas: web                 # Target canvas: web | mobile | tablet | desktop-fold
+  width: 1440                 # Root frame width in px (desktop-fold: 1920)
+  height: 900                 # Root frame height in px (desktop-fold: 945 — 1080p viewport minus browser UI + taskbar, fixed = above-the-fold)
   pattern: ""                 # Design pattern name (e.g. "sidebar-detail", "dashboard-grid")
   recipe: ""                  # Optional: recipe name if using a predefined layout recipe
   reference: ""               # Optional: Figma node ID of an existing screen to clone shell from

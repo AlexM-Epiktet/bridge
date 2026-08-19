@@ -21,6 +21,7 @@ deliberately small (~400 tokens) to keep the fixed per-session cost low.
 | User intent (keywords)                                         | Route to                          |
 |----------------------------------------------------------------|-----------------------------------|
 | "make", "design", "create", "build", "generate", "new component", "new screen" | `generating-figma-design`         |
+| "make mockup", "mockup", "maquette"                              | `generating-figma-design` (desktop-fold mockup mode) |
 | "fix", "correct", "learn", "diff", "what changed", "I adjusted" | `learning-from-corrections`       |
 | "done", "ship", "ship it", "finish", "complete"                 | `shipping-and-archiving`          |
 | "setup", "setup bridge", "extract", "extract DS", "onboard", "initialize", "bootstrap" | `extracting-design-system`        |
