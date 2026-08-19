@@ -84,7 +84,7 @@ One phrase. The skill handles pre-flight, scaffolding, extraction, GitHub secret
 
 | Layer         | Technology            | Description                                                  |
 | ------------- | --------------------- | ------------------------------------------------------------ |
-| **Workflow**  | Claude Code Skills    | Five focused skills (see [Skills](#skills) below)            |
+| **Workflow**  | Claude Code Skills    | Eight focused skills (see [Skills](#skills) below)           |
 | **Spec**      | CSpec YAML            | Structured, human-readable compilable specifications         |
 | **Compiler**  | TypeScript            | Scene graph JSON → Figma Plugin API code (26 rules enforced) |
 | **Transport** | MCP                   | `figma-console-mcp` (preferred) or official Figma MCP server |
@@ -104,6 +104,9 @@ You describe → Claude writes CSpec → Compiler resolves tokens → MCP → Fi
 | `learning-from-corrections` | `fix`                | Diff Figma corrections, extract learnings, patch recipes |
 | `shipping-and-archiving`    | `done`               | Final gate, archive, extract recipes                     |
 | `extracting-design-system`  | `setup bridge`       | Bootstrap a DS repo end-to-end                           |
+| `coding-from-design`        | `code <spec>`        | Scene graph → framework code, verified against the board |
+| `importing-from-figma`      | `import`             | Figma selection → scene graph + CSpec                    |
+| `syncing-drift`             | `sync`               | Read-only drift probe; recommends, never writes          |
 
 ## The compiler
 
@@ -134,10 +137,31 @@ Direct CLI commands (typically invoked under the hood by skills):
 | ---------------------------------------------------- | ----------------------------------------------------------- |
 | `bridge-ds setup --ds-name <name> --figma-key <key>` | Headless scaffold (used by `setup bridge`)                  |
 | `bridge-ds compile --input <json> --kb <path>`       | Compile a scene graph JSON                                  |
+| `bridge-ds code --input <json> --kb <path>`          | Generate framework code from a scene graph                  |
+| `bridge-ds import --tree <json> --kb <path>`         | Turn an extracted Figma node tree into a scene graph        |
+| `bridge-ds drift --kb <path>`                        | Report KB drift against Figma — read-only, writes nothing   |
 | `bridge-ds doctor`                                   | Diagnose config, connectivity, KB health                    |
 | `bridge-ds extract --headless`                       | Figma REST extraction (CI-friendly, `FIGMA_TOKEN` required) |
 | `bridge-ds migrate`                                  | Upgrade a legacy knowledge base to the current schema       |
 | `bridge-ds cron`                                     | Run the cron orchestrator (KB sync, opens PR on diff)       |
+
+### Code generation
+
+`code` reuses the compiler's schema → registry → resolve stages and swaps the Figma emitter for a web one, so the semantic scene graph — not a pixel tree — is the input. It emits an Angular component, template and Storybook story.
+
+Nothing is guessed. A token the knowledge base cannot bind to CSS, and a component with no code binding in `components.json`, both produce a FLAG and no output for that property. Gaps show up in review; wrong values do not.
+
+```bash
+bridge-ds code --input scene.json --kb <kb-path> --out src/app/components --doc-language fr
+```
+
+### Import
+
+`import` runs the compiler backwards: a bound variable becomes a `$token`. Values that are _not_ bound to a design-system variable or style are imported exactly as they stand and flagged, with `suggestion` always null. The imported spec will not compile until those are tokenised — which is the point.
+
+```bash
+bridge-ds import --tree tree.json --kb <kb-path> --out scene.json
+```
 
 ## Recipes
 

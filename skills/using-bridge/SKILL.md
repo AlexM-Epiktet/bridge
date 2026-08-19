@@ -1,6 +1,6 @@
 ---
 name: using-bridge
-description: Use when any Bridge command is invoked (make, fix, done, setup, drop, status) or any Figma / design-system / compiler / Bridge workflow topic is raised. Sets command priorities and iron laws (compiler-only, semantic tokens only, verification-before-ship).
+description: Use when any Bridge command is invoked (make, fix, done, setup, code, import, sync, drop, status) or any Figma / design-system / compiler / Bridge workflow topic is raised. Sets command priorities and iron laws (compiler-only, semantic tokens only, verification-before-ship, never guess a token).
 ---
 
 # Using Bridge
@@ -24,8 +24,16 @@ deliberately small (~400 tokens) to keep the fixed per-session cost low.
 | "fix", "correct", "learn", "diff", "what changed", "I adjusted" | `learning-from-corrections`       |
 | "done", "ship", "ship it", "finish", "complete"                 | `shipping-and-archiving`          |
 | "setup", "setup bridge", "extract", "extract DS", "onboard", "initialize", "bootstrap" | `extracting-design-system`        |
+| "code", "code this", "implement", "scaffold the component", "turn this into code" | `coding-from-design`              |
+| "import", "detect what I drew", "make a spec from this selection" | `importing-from-figma`            |
+| "sync", "check drift", "is the KB up to date", "did anything change" | `syncing-drift`                   |
 | "drop", "abandon", "cancel"                                     | inline `Drop Procedure` (this skill) |
 | "status", "what's next", "workflow"                             | inline status logic (this skill)  |
+
+**Direction matters when routing.** `make` generates Figma *from* a spec;
+`import` builds a spec *from* Figma; `code` generates framework code *from* a
+spec. If the user edited a design Bridge itself generated, that is `fix` — not
+`import` — because `fix` diffs against the snapshot and captures learnings.
 
 ---
 
@@ -92,6 +100,10 @@ NEVER read `figma-api-rules.md`. The compiler enforces all 26 rules. This file d
 NEVER reuse a Figma `nodeId` from a previous session. Node IDs are session-scoped — re-search.
 </IRON-LAW>
 
+<IRON-LAW>
+NEVER infer a token from a raw value. When importing from Figma or generating code, a value that is not bound to a design-system variable or style is reported as a FLAG with its raw value and no suggestion. "Nearest match", "obviously this token", and "close enough" are the one move that silently breaks compiler-enforced correctness.
+</IRON-LAW>
+
 ---
 
 ## Red Flags — Rationalization → Reality
@@ -103,6 +115,8 @@ NEVER reuse a Figma `nodeId` from a previous session. Node IDs are session-scope
 | "Skip the screenshot, it's obviously right" | 'Looks right' ≠ 'is right'. |
 | "I remember this nodeId from my last session" | Node IDs are session-scoped. Re-search. |
 | "I'll use figma-api-rules.md for context" | That file is forbidden. Compiler owns all rules. |
+| "This hex is obviously $color/bg/primary" | Import flags it. Guessing a token defeats the compiler. |
+| "The KB can't bind this token, I'll inline the px value" | Emit the flag. A hardcoded value in generated code is still hardcoded. |
 | "The user approved, I can skip the compile exit code check" | Compile exit 0 is Gate A. Independent of user approval. |
 | "Let me write a small inline Plugin API script for this fix" | No inline scripts. Scene graph → compiler → execute. |
 

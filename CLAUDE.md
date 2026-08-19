@@ -53,6 +53,9 @@ Bridge uses a **multi-skill** Claude Code architecture. Commands are triggered b
 | `learning-from-corrections` | `fix`                       | Diff Figma corrections, extract learnings, patch recipes     |
 | `shipping-and-archiving`    | `done`                      | Final Gate B verification, archive CSpec, extract recipes    |
 | `extracting-design-system`  | `setup bridge`              | Extract DS from Figma, scaffold repo, wire up cron           |
+| `coding-from-design`        | `code <spec>`               | Scene graph → framework code, Gate C against the board       |
+| `importing-from-figma`      | `import`                    | Figma node tree → scene graph + CSpec, flags what is unbound |
+| `syncing-drift`             | `sync`                      | Read-only drift probe; recommends, never writes              |
 
 Shared references live at the repo root under `references/`:
 
@@ -75,7 +78,9 @@ The compiler takes a scene graph JSON with `$token` references and outputs execu
 
 ## Scene graph (summary)
 
-Claude produces JSON with node types: FRAME, TEXT, INSTANCE, CLONE, RECTANGLE, ELLIPSE, REPEAT, CONDITIONAL. All values use `$token` references (`$spacing/md`, `$color/bg/neutral/default`, `$text/heading/xl`, `$comp/Button`). The compiler resolves tokens against the knowledge base registries.
+Claude produces JSON with node types: FRAME, TEXT, INSTANCE, CLONE, RECTANGLE, ELLIPSE, REPEAT, CONDITIONAL, COMPONENT, COMPONENT_SET. All values use `$token` references (`$spacing/md`, `$color/bg/neutral/default`, `$text/heading/xl`, `$comp/Button`). The compiler resolves tokens against the knowledge base registries.
+
+COMPONENT and COMPONENT_SET author master components: the set declares `variantProperties` (the axes), each COMPONENT child pins its `variantValues` on every axis, and `componentProperties` exposes TEXT / BOOLEAN / INSTANCE_SWAP properties, optionally bound to a descendant layer via `bindTo`. A component created this way registers itself in the KB immediately, so it resolves as `$comp/<name>` without waiting for the cron.
 
 ## Recipe system
 
@@ -84,10 +89,21 @@ Pre-built scene graph templates in `knowledge-base/recipes/` that evolve with us
 ## Workflow
 
 ```
-setup bridge (once) → make → [fix cycle] → done
+setup bridge (once) → make → [fix cycle] → done → code
+                       ↑
+                    import (bring an existing Figma design under Bridge)
+                    sync   (has anything drifted?)
 ```
 
 `make` = context load + recipe match + section decompose/classify + CSpec generation + compile + execute + verify. Iteration happens within `make` (describe changes) or via `fix` (manual Figma corrections).
+
+**Direction matters.** `make` generates Figma from a spec; `import` builds a spec from Figma; `code` generates framework code from a spec. A design Bridge itself generated and the user then edited goes through `fix`, not `import` — `fix` diffs against the snapshot and captures learnings.
+
+## Never infer a token
+
+Import and code generation both convert only what the knowledge base can prove. A value bound to a DS variable or style converts deterministically; anything else is reported as a FLAG with its raw value and **no suggested token**. Guessing the "nearest" token is the single move that would break correctness-by-construction while appearing to work.
+
+A consequence worth knowing: on non-Enterprise Figma plans the variables REST endpoint returns 403, so `variables.json` holds keys with no values. Token → CSS resolution then depends entirely on a `theme-values.json` lockfile, and tokens in neither are unusable from code until they are bound.
 
 ## Knowledge base layout
 
