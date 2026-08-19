@@ -471,8 +471,163 @@ test("a component set exposes its axes and properties as typed signal inputs", (
   );
   assert.match(ts, /public readonly label: InputSignal<string> = input<string>\('Click'\);/);
   assert.match(ts, /public readonly showIcon: InputSignal<boolean> = input<boolean>\(false\);/);
-  // Variants are not silently claimed to be wired.
-  assert.ok(result.notes.some((n) => n.includes("per-variant class differences are not wired")));
+  // With no variants there is nothing to wire, and that is stated rather than
+  // left ambiguous.
+  assert.ok(result.notes.some((n) => n.includes("nothing needed wiring")));
+});
+
+// ─── Variant wiring ──────────────────────────────────────────────────────────
+
+/** A two-axis set whose variants differ only in the root's background. */
+function buttonSet(): ResolvedNode {
+  const variant = (
+    color: string,
+    size: string,
+    fillKey: string,
+    fillName: string
+  ): ResolvedNode => ({
+    type: "COMPONENT",
+    name: `${color}/${size}`,
+    variantValues: { color, size },
+    layout: "HORIZONTAL",
+    fill: tk(fillKey, fillName),
+    radius: tk("KR", "radius/boxes"),
+    children: [
+      {
+        type: "TEXT",
+        name: "Label",
+        characters: "Envoyer",
+        textStyle: {
+          ref: "$text/sans/sm",
+          key: "TS",
+          name: "🌀 tailwind/sans/sm/normal",
+          kind: "textStyle",
+          importMethod: null,
+        },
+      },
+    ],
+  });
+
+  return {
+    type: "COMPONENT_SET",
+    name: "Button",
+    variantProperties: [
+      { name: "color", values: ["primary", "base"], default: "primary" },
+      { name: "size", values: ["sm"] },
+    ],
+    children: [
+      variant("primary", "sm", "KP", "main/color/primary/primary"),
+      variant("base", "sm", "KB1", "main/color/base/100"),
+    ],
+  };
+}
+
+test("a component set renders one variant, not every variant side by side", () => {
+  const result = emit([buttonSet()]);
+  const html = fileNamed(result, ".component.html");
+  // One Label, from the default variant — not one per variant.
+  assert.equal((html.match(/Envoyer/g) ?? []).length, 1);
+});
+
+test("classes that differ across variants move to a lookup table and a computed", () => {
+  const result = emit([buttonSet()]);
+  const ts = fileNamed(result, ".component.ts");
+
+  // The differing class is tabulated per variant combination...
+  assert.match(ts, /const ROOT_VARIANT_CLASSES: Record<string, string> = \{/);
+  assert.match(ts, /'primary\|sm': 'bg-primary',/);
+  assert.match(ts, /'base\|sm': 'bg-base-100',/);
+
+  // ...selected by a computed keyed on the axis inputs...
+  assert.match(ts, /protected readonly rootVariantClasses: Signal<string> = computed\(/);
+  assert.match(ts, /ROOT_VARIANT_CLASSES\[`\$\{this\.color\(\)\}\|\$\{this\.size\(\)\}`\] \?\? ''/);
+
+  // ...and bound on the host alongside the classes every variant shares.
+  assert.match(
+    ts,
+    /host: \{ class: '[^']*rounded-box[^']*', '\[class\]': 'rootVariantClasses\(\)' \}/
+  );
+  // The variant-dependent class must not also be hardcoded in the static half.
+  assert.doesNotMatch(ts, /host: \{ class: '[^']*bg-primary/);
+
+  assert.match(
+    ts,
+    /import \{ ChangeDetectionStrategy, Component, InputSignal, Signal, computed, input \}/
+  );
+});
+
+/** The body of a generated lookup table, so assertions do not span the file. */
+function tableBody(ts: string, constName: string): string {
+  const match = new RegExp(
+    `const ${constName}: Record<string, string> = \\{([\\s\\S]*?)\\n\\};`
+  ).exec(ts);
+  assert.ok(match, `expected a ${constName} table`);
+  return match![1]!;
+}
+
+test("classes shared by every variant stay static", () => {
+  const ts = fileNamed(emit([buttonSet()]), ".component.ts");
+  // radius is identical across variants, so it never enters the table...
+  assert.doesNotMatch(tableBody(ts, "ROOT_VARIANT_CLASSES"), /rounded-box/);
+  // ...it stays on the host instead.
+  assert.match(ts, /host: \{ class: '[^']*rounded-box/);
+});
+
+test("a child node that differs across variants is wired on the element", () => {
+  const set = buttonSet();
+  const labelOf = (i: number): ResolvedNode => (set.children![i] as ResolvedNode).children![0]!;
+  // Both labels share a colour but differ in typography, so the split is visible.
+  labelOf(0).fill = tk("KBC", "main/color/base/content");
+  labelOf(1).fill = tk("KBC", "main/color/base/content");
+  labelOf(1).textStyle = {
+    ref: "$text/sans/lg",
+    key: "TS2",
+    name: "🌀 tailwind/sans/lg/bold",
+    kind: "textStyle",
+    importMethod: null,
+  };
+  const result = emit([set]);
+  const html = fileNamed(result, ".component.html");
+  const ts = fileNamed(result, ".component.ts");
+
+  // Shared colour stays declarative; the typography that changes is bound.
+  assert.match(html, /<span class="text-base-content" \[class\]="variantClasses1\(\)"/);
+  const body = tableBody(ts, "VARIANT_CLASSES_1");
+  // Class order follows the source, not the diff, so the table reads naturally.
+  assert.match(body, /'primary\|sm': 'text-sm',/);
+  assert.match(body, /'base\|sm': 'text-lg font-bold',/);
+  assert.doesNotMatch(body, /text-base-content/);
+});
+
+test("a node with no shared classes is bound without an empty class attribute", () => {
+  const set = buttonSet();
+  (set.children![1] as ResolvedNode).children![0]!.textStyle = {
+    ref: "$text/sans/lg",
+    key: "TS2",
+    name: "🌀 tailwind/sans/lg/bold",
+    kind: "textStyle",
+    importMethod: null,
+  };
+  const html = fileNamed(emit([set]), ".component.html");
+  assert.match(html, /<span \[class\]="variantClasses1\(\)">/);
+  assert.doesNotMatch(html, /class=""/);
+});
+
+test("variants with mismatched structure are reported rather than mis-wired", () => {
+  const set = buttonSet();
+  // Second variant loses its label, so positions no longer correspond.
+  (set.children![1] as ResolvedNode).children = [];
+  const result = emit([set]);
+  assert.ok(result.notes.some((n) => n.includes("different structure from the first variant")));
+});
+
+test("the default variant seeds the template regardless of authoring order", () => {
+  const set = buttonSet();
+  set.children!.reverse(); // "base" now comes first; "primary" is still the default
+  const ts = fileNamed(emit([set]), ".component.ts");
+  // The static host keeps the shared classes; the default's own fill is in the
+  // table, so ordering must not change which variant the template came from.
+  assert.match(ts, /'primary\|sm': 'bg-primary',/);
 });
 
 // ─── House style ─────────────────────────────────────────────────────────────

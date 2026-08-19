@@ -332,6 +332,29 @@ interface TemplateContext extends StyleContext {
   bindings: BindingIndex;
   /** Selector → import path, accumulated for the component's `imports` array. */
   usedComponents: Map<string, string>;
+  /** Structural path → variant wiring, when the source is a component set. */
+  classPlan?: Map<string, ClassPlan>;
+}
+
+/**
+ * Render a node's class attributes.
+ *
+ * When a node's classes differ between variants, the shared ones stay a static
+ * `class` and the rest move to a `[class]` binding. Angular merges the two, so
+ * the static half remains greppable in the template instead of disappearing
+ * into a lookup table.
+ */
+function classAttrFor(
+  ctx: TemplateContext,
+  structPath: string,
+  classes: readonly string[]
+): string {
+  const plan = ctx.classPlan?.get(structPath);
+  if (!plan) return classAttr(classes);
+
+  const dynamic = new Set(plan.variantClasses);
+  const staticPart = classes.filter((c) => c && !dynamic.has(c));
+  return `${classAttr(staticPart)} [class]="${plan.signal}()"`;
 }
 
 function emitNode(
@@ -339,7 +362,8 @@ function emitNode(
   ctx: TemplateContext,
   indent: string,
   depth: number,
-  parentPath: string
+  parentPath: string,
+  structPath = ""
 ): string[] {
   const pad = indent.repeat(depth);
   const nodePath = parentPath
@@ -353,14 +377,17 @@ function emitNode(
     case "FRAME":
     case "COMPONENT": {
       const classes = containerClasses(node, ctx, nodePath);
+      const attrs = classAttrFor(ctx, structPath, [...classes, hidden.trim()]);
       const children = Array.isArray(node.children) ? node.children : [];
       if (children.length === 0) {
-        lines.push(`${pad}<div${classAttr([...classes, hidden.trim()])}></div>`);
+        lines.push(`${pad}<div${attrs}></div>`);
       } else {
-        lines.push(`${pad}<div${classAttr([...classes, hidden.trim()])}>`);
-        for (const child of children) {
-          lines.push(...emitNode(child, ctx, indent, depth + 1, nodePath));
-        }
+        lines.push(`${pad}<div${attrs}>`);
+        children.forEach((child, i) => {
+          lines.push(
+            ...emitNode(child, ctx, indent, depth + 1, nodePath, childPath(structPath, i))
+          );
+        });
         lines.push(`${pad}</div>`);
       }
       break;
@@ -373,7 +400,9 @@ function emitNode(
         ...(node.fillH ? ["w-full"] : []),
         hidden.trim(),
       ];
-      lines.push(`${pad}<span${classAttr(classes)}>${escapeText(node.characters ?? "")}</span>`);
+      lines.push(
+        `${pad}<span${classAttrFor(ctx, structPath, classes)}>${escapeText(node.characters ?? "")}</span>`
+      );
       break;
     }
 
@@ -392,7 +421,7 @@ function emitNode(
         ...(node.type === "ELLIPSE" ? ["rounded-full"] : []),
         hidden.trim(),
       ];
-      lines.push(`${pad}<div${classAttr(classes)} aria-hidden="true"></div>`);
+      lines.push(`${pad}<div${classAttrFor(ctx, structPath, classes)} aria-hidden="true"></div>`);
       break;
     }
 
@@ -405,6 +434,10 @@ function emitNode(
   }
 
   return lines;
+}
+
+function childPath(parent: string, index: number): string {
+  return parent ? `${parent}.${index}` : String(index);
 }
 
 /**
@@ -508,6 +541,211 @@ function variantAttributes(node: ResolvedNode): string {
 }
 
 // ---------------------------------------------------------------------------
+// VARIANT WIRING
+// ---------------------------------------------------------------------------
+
+export interface ClassPlan {
+  /** Every class this node takes in at least one variant but not all of them. */
+  variantClasses: string[];
+  /** Name of the computed signal that supplies them at runtime. */
+  signal: string;
+}
+
+interface VariantTable {
+  constName: string;
+  signal: string;
+  /** Variant key (axis values joined by `|`) → class string. */
+  entries: Array<[string, string]>;
+}
+
+interface VariantWiring {
+  plan: Map<string, ClassPlan>;
+  tables: VariantTable[];
+  /** camelCase input names, in axis-declaration order. */
+  axisInputs: string[];
+  notes: string[];
+}
+
+/**
+ * Compute a node's classes without emitting markup, so variants can be compared
+ * before the template is written.
+ *
+ * INSTANCE nodes are skipped: they render an element rather than a styled box,
+ * so a class diff does not describe how they change between variants.
+ */
+function collectClasses(
+  node: ResolvedNode,
+  ctx: StyleContext,
+  structPath: string,
+  out: Map<string, string[]>
+): void {
+  const nodePath = node.name ?? node.type;
+
+  switch (node.type) {
+    case "FRAME":
+    case "COMPONENT": {
+      out.set(structPath, containerClasses(node, ctx, nodePath));
+      const children = Array.isArray(node.children) ? node.children : [];
+      children.forEach((child, i) => collectClasses(child, ctx, childPath(structPath, i), out));
+      break;
+    }
+    case "TEXT":
+      out.set(structPath, [
+        ...textStyleClasses(node.textStyle, ctx, nodePath),
+        ...(node.fill ? style(ctx, "text", node.fill, nodePath).classes : []),
+      ]);
+      break;
+    case "RECTANGLE":
+    case "ELLIPSE":
+      out.set(structPath, [
+        ...(node.fill ? style(ctx, "bg", node.fill, nodePath).classes : []),
+        ...(node.stroke ? style(ctx, "border", node.stroke, nodePath).classes : []),
+        ...(node.radius ? style(ctx, "rounded", node.radius, nodePath).classes : []),
+      ]);
+      break;
+    default:
+      break;
+  }
+}
+
+/** The key a variant is looked up by: its axis values in declaration order. */
+function variantKey(variantValues: Record<string, string> | undefined, axes: string[]): string {
+  return axes.map((a) => variantValues?.[a] ?? "").join("|");
+}
+
+/**
+ * The variant whose tree seeds the template: the one matching every axis
+ * default, falling back to the first. Rendering an arbitrary variant would make
+ * the generated component's resting state depend on authoring order.
+ */
+function defaultVariantOf(setNode: ResolvedNode): ResolvedNode | undefined {
+  const variants = (Array.isArray(setNode.children) ? setNode.children : []).filter(
+    (c) => c.type === "COMPONENT"
+  );
+  if (variants.length === 0) return undefined;
+
+  const axes = setNode.variantProperties ?? [];
+  const defaults = axes.filter((a) => a.default !== undefined);
+  if (defaults.length > 0) {
+    const match = variants.find((v) =>
+      defaults.every((a) => v.variantValues?.[a.name] === a.default)
+    );
+    if (match) return match;
+  }
+  return variants[0];
+}
+
+/**
+ * Work out which classes actually change between the variants of a component
+ * set, and how to select them at runtime.
+ *
+ * The set's variants usually differ in a handful of decorative properties while
+ * sharing their whole structure, so the useful output is small: for each node
+ * that changes, the classes it takes per variant combination. Everything
+ * identical across variants stays a plain static class.
+ *
+ * Variants whose structure differs from the reference are not wired — a class
+ * diff is only meaningful between trees of the same shape — and that is
+ * reported rather than approximated.
+ */
+function planVariantClasses(
+  setNode: ResolvedNode,
+  styler: TokenStyler,
+  docLanguage: "en" | "fr"
+): VariantWiring {
+  const notes: string[] = [];
+  const axes = (setNode.variantProperties ?? []).map((a) => a.name);
+  const variants = (Array.isArray(setNode.children) ? setNode.children : []).filter(
+    (c) => c.type === "COMPONENT"
+  );
+
+  const empty: VariantWiring = { plan: new Map(), tables: [], axisInputs: [], notes };
+  if (axes.length === 0 || variants.length < 2) return empty;
+
+  // Flags raised here would duplicate those from the emit pass, which walks the
+  // reference variant with the real context. Collection uses a scratch context.
+  const scratch: StyleContext = { styler, flags: [], notes: [] };
+
+  const byVariant = new Map<string, Map<string, string[]>>();
+  const reference = variants[0]!;
+  const referenceMap = new Map<string, string[]>();
+  collectClasses(reference, scratch, "", referenceMap);
+
+  for (const variant of variants) {
+    const map = new Map<string, string[]>();
+    collectClasses(variant, scratch, "", map);
+    if (map.size !== referenceMap.size) {
+      notes.push(
+        `Variant "${variant.name ?? "?"}" has a different structure from the first variant, ` +
+          `so its class differences were not wired. Give every variant the same layer tree, ` +
+          `or wire this axis by hand.`
+      );
+      continue;
+    }
+    byVariant.set(variantKey(variant.variantValues, axes), map);
+  }
+
+  if (byVariant.size < 2) return { ...empty, notes };
+
+  const plan = new Map<string, ClassPlan>();
+  const tables: VariantTable[] = [];
+
+  for (const structPath of referenceMap.keys()) {
+    const perVariant = new Map<string, string[]>();
+    for (const [key, map] of byVariant) perVariant.set(key, map.get(structPath) ?? []);
+
+    // A class present in every variant is static; the rest are what changes.
+    const counts = new Map<string, number>();
+    for (const classes of perVariant.values()) {
+      for (const c of new Set(classes)) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const changing = [...counts.entries()]
+      .filter(([, n]) => n < perVariant.size)
+      .map(([c]) => c)
+      .sort();
+
+    if (changing.length === 0) continue;
+
+    // Names are positional rather than path-derived: a structural path makes a
+    // poor identifier (`variantClasses_0_1`) and the mapping does not need to be
+    // readable from the name — the table above each signal already says what it
+    // selects.
+    const isRoot = structPath === "";
+    // The root is named rather than numbered, so the counter skips it and the
+    // first numbered table is 1.
+    const ordinal = tables.filter((t) => t.signal !== "rootVariantClasses").length + 1;
+    const signal = isRoot ? "rootVariantClasses" : `variantClasses${ordinal}`;
+    const constName = isRoot ? "ROOT_VARIANT_CLASSES" : `VARIANT_CLASSES_${ordinal}`;
+    plan.set(structPath, { variantClasses: changing, signal });
+
+    const changingSet = new Set(changing);
+    tables.push({
+      constName,
+      signal,
+      entries: [...byVariant.keys()].map((key) => [
+        key,
+        (perVariant.get(key) ?? []).filter((c) => changingSet.has(c)).join(" "),
+      ]),
+    });
+  }
+
+  if (plan.size > 0) {
+    notes.push(
+      docLanguage === "fr"
+        ? `${plan.size} nœud(s) changent de classes selon la variante ; les tables générées sont vérifiables à la lecture.`
+        : `${plan.size} node(s) change classes across variants; the generated lookup tables are reviewable at a glance.`
+    );
+  }
+
+  return {
+    plan,
+    tables,
+    axisInputs: axes.map((a) => toCamelCase(normalisePropertyName(a))),
+    notes,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // COMPONENT API (inputs)
 // ---------------------------------------------------------------------------
 
@@ -600,21 +838,35 @@ export function emitAngularComponent(
   // component has exactly one host.
   const roots = graph.nodes ?? [];
   const singleRoot = roots.length === 1 ? roots[0] : undefined;
-  const hostClasses = singleRoot
-    ? containerClasses(singleRoot, ctx, singleRoot.name ?? "root", true)
+
+  // A component set is not itself renderable: one Angular component covers the
+  // whole matrix, so the template is built from one variant and the axes become
+  // inputs. Emitting every variant side by side would render the Figma canvas
+  // rather than the component.
+  const isSet = singleRoot?.type === "COMPONENT_SET";
+  const wiring = isSet
+    ? planVariantClasses(singleRoot!, ctx.styler, docLanguage)
+    : { plan: new Map<string, ClassPlan>(), tables: [], axisInputs: [], notes: [] };
+  ctx.classPlan = wiring.plan;
+  ctx.notes.push(...wiring.notes);
+
+  const templateRoot = isSet ? defaultVariantOf(singleRoot!) : singleRoot;
+
+  const hostClasses = templateRoot
+    ? containerClasses(templateRoot, ctx, templateRoot.name ?? "root", true)
     : [];
 
-  const bodyNodes = singleRoot
-    ? Array.isArray(singleRoot.children)
-      ? singleRoot.children
+  const bodyNodes = templateRoot
+    ? Array.isArray(templateRoot.children)
+      ? templateRoot.children
       : []
     : roots;
-  const rootPath = singleRoot?.name ?? "";
+  const rootPath = templateRoot?.name ?? "";
 
   const templateLines: string[] = [];
-  for (const node of bodyNodes) {
-    templateLines.push(...emitNode(node, ctx, indent, 0, rootPath));
-  }
+  bodyNodes.forEach((node, i) => {
+    templateLines.push(...emitNode(node, ctx, indent, 0, rootPath, childPath("", i)));
+  });
 
   if (roots.length > 1) {
     ctx.notes.push(
@@ -624,12 +876,14 @@ export function emitAngularComponent(
   }
 
   const inputs = inputsFor(singleRoot, docLanguage);
-  if (singleRoot?.type === "COMPONENT_SET") {
-    const variantCount = Array.isArray(singleRoot.children) ? singleRoot.children.length : 0;
+  if (isSet) {
+    const variantCount = Array.isArray(singleRoot!.children) ? singleRoot!.children.length : 0;
     ctx.notes.push(
-      `The source is a component set with ${variantCount} variants. The template renders the ` +
-        `default variant and the axes are exposed as inputs, but the per-variant class ` +
-        `differences are not wired — review each axis and bind it to the classes it changes.`
+      `The source is a component set with ${variantCount} variants; the template renders the ` +
+        `default one and every axis is exposed as an input.` +
+        (wiring.plan.size === 0
+          ? ` No class differences were found between variants, so nothing needed wiring.`
+          : ``)
     );
   }
 
@@ -658,6 +912,7 @@ export function emitAngularComponent(
       specName: opts.specName ?? opts.name,
       baseClass: opts.baseClass ?? null,
       usedComponents: ctx.usedComponents,
+      wiring,
     }),
   });
 
@@ -682,12 +937,16 @@ interface ClassFileParams {
   specName: string;
   baseClass: { name: string; importPath: string } | null;
   usedComponents: Map<string, string>;
+  wiring: VariantWiring;
 }
 
 function renderClassFile(p: ClassFileParams): string {
   const i = p.indent;
+  const hasWiring = p.wiring.tables.length > 0;
+
   const angularImports = ["ChangeDetectionStrategy", "Component"];
   if (p.inputs.length > 0) angularImports.push("input", "InputSignal");
+  if (hasWiring) angularImports.push("computed", "Signal");
 
   const lines: string[] = [];
   lines.push(`import { ${angularImports.sort().join(", ")} } from '@angular/core';`);
@@ -707,6 +966,23 @@ function renderClassFile(p: ClassFileParams): string {
     lines.push(`import { ${names.sort().join(", ")} } from '${lib}';`);
   }
 
+  // Variant lookup tables live at module scope: they are constants derived from
+  // the design, not per-instance state, and keeping them out of the class makes
+  // the whole matrix readable in one place during review. They precede the
+  // component's doc comment so that comment stays attached to @Component.
+  const rootPlan = p.wiring.plan.get("");
+  if (hasWiring) {
+    lines.push("");
+    for (const table of p.wiring.tables) {
+      lines.push(`/** Keyed by \`${p.wiring.axisInputs.join(" | ")}\`. */`);
+      lines.push(`const ${table.constName}: Record<string, string> = {`);
+      for (const [key, classes] of table.entries) {
+        lines.push(`${i}'${key}': '${classes}',`);
+      }
+      lines.push("};");
+    }
+  }
+
   lines.push("");
   lines.push("/**");
   lines.push(
@@ -724,9 +1000,20 @@ function renderClassFile(p: ClassFileParams): string {
   lines.push("@Component({");
   lines.push(`${i}selector: '${p.selector}',`);
   lines.push(`${i}templateUrl: './${p.kebab}.component.html',`);
-  if (p.hostClasses.length > 0) {
-    lines.push(`${i}host: { class: '${Array.from(new Set(p.hostClasses)).join(" ")}' },`);
+
+  const staticHost = Array.from(new Set(p.hostClasses)).filter(
+    (c) => !rootPlan?.variantClasses.includes(c)
+  );
+  if (rootPlan) {
+    // The host's own classes are split the same way a child's are: the shared
+    // ones stay declarative, the variant-dependent ones come from the signal.
+    lines.push(
+      `${i}host: { class: '${staticHost.join(" ")}', '[class]': '${rootPlan.signal}()' },`
+    );
+  } else if (staticHost.length > 0) {
+    lines.push(`${i}host: { class: '${staticHost.join(" ")}' },`);
   }
+
   const importNames = Array.from(byLib.values()).flat().sort();
   if (importNames.length > 0) {
     lines.push(`${i}imports: [${importNames.join(", ")}],`);
@@ -735,14 +1022,33 @@ function renderClassFile(p: ClassFileParams): string {
   lines.push("})");
 
   const extendsClause = p.baseClass ? ` extends ${p.baseClass.name}` : "";
-  if (p.inputs.length === 0) {
+  const members: string[][] = [];
+
+  for (const input of p.inputs) {
+    members.push([
+      `${i}/** ${input.doc} */`,
+      `${i}public readonly ${input.name}: ${input.signalType} = ${input.initializer};`,
+    ]);
+  }
+
+  // `protected` because the template is the only consumer — the house rule is
+  // that anything not part of the public API stays out of it.
+  const key = p.wiring.axisInputs.map((a) => `\${this.${a}()}`).join("|");
+  for (const table of p.wiring.tables) {
+    members.push([
+      `${i}protected readonly ${table.signal}: Signal<string> = computed(`,
+      `${i}${i}() => ${table.constName}[\`${key}\`] ?? ''`,
+      `${i});`,
+    ]);
+  }
+
+  if (members.length === 0) {
     lines.push(`export class ${p.className}${extendsClause} {}`);
   } else {
     lines.push(`export class ${p.className}${extendsClause} {`);
-    p.inputs.forEach((input, index) => {
+    members.forEach((member, index) => {
       if (index > 0) lines.push("");
-      lines.push(`${i}/** ${input.doc} */`);
-      lines.push(`${i}public readonly ${input.name}: ${input.signalType} = ${input.initializer};`);
+      lines.push(...member);
     });
     lines.push("}");
   }

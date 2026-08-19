@@ -295,6 +295,21 @@ Published Figma libraries name things `🌀 tailwind/sans/lg/normal`, `📐 size
 properties — needs to normalise before matching. Anchored or exact matching
 silently missed everything on real data while passing on clean fixtures.
 
+## Closed after the first pass
+
+- **Component-set variants are now wired.** The first pass rendered the default
+  variant and exposed the axes as inputs but left the per-variant class
+  differences to the reader. `code` now diffs the variant subtrees: classes
+  shared by every variant stay static, the rest move into a module-scope lookup
+  table selected by a `computed()` keyed on the axis inputs. Variants whose
+  structure differs from the reference are reported rather than mis-wired,
+  since a class diff is only meaningful between trees of the same shape.
+
+  Fixing it surfaced a real defect: a component set was emitting *every* variant
+  side by side, because the set's children were treated as template content. A
+  component set is not renderable — one Angular component covers the whole
+  matrix.
+
 ## Known gaps, deliberately not closed
 
 - **Semantic spacing tokens generate nothing.** `space/*` (the layer the specs
@@ -302,10 +317,6 @@ silently missed everything on real data while passing on clean fixtures.
   and no CSS binding, so `code` flags it. Closing this means binding those
   tokens in the consumer's theme and adding them to the lockfile; it is a
   design-system decision, not a compiler change.
-- **Component-set variants are not wired.** `code` renders the default variant
-  and exposes the axes as inputs, but does not compute the per-variant class
-  differences. Deriving them is feasible — diff the variant subtrees — and is
-  the obvious next increment.
 - **Heading semantics.** Every text node emits `<span>`; heading level is not
   in the scene graph and is not guessed.
 - **`$text/<size>/<weight>` refs do not resolve** against emoji-prefixed style
