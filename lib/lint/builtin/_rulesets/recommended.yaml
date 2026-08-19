@@ -1,7 +1,7 @@
 # Universal rules every Bridge DS should run.
 # Extend in consumer config via: `extends: [bridge:recommended]`
 #
-# All 18 universal rules ship with @noemuch/bridge-ds@7.0.0:
+# All 18 universal rules ship with @kinougarde/bridge-ds@7.0.0:
 # - tokens (5): hex/spacing literal blockers, token ref resolution, DTCG
 #   compliance, deprecated-token warning
 # - structure (4): CSpec shape, required fields, snapshot colocation,

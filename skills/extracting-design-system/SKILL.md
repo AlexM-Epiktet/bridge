@@ -37,7 +37,7 @@ gh auth status
 
 Then Node:
 ```js
-const { runPreflight } = require("/path/to/node_modules/@noemuch/bridge-ds/dist/lib/cli/setup-orchestrator.js");
+const { runPreflight } = require("/path/to/node_modules/@kinougarde/bridge-ds/dist/lib/cli/setup-orchestrator.js");
 const { gitRemote, figmaKey } = await runPreflight();
 ```
 
@@ -77,7 +77,7 @@ If skipped: plan to use MCP path only (no cron support until token added later).
 Via Bash:
 ```bash
 node -e "
-const { scaffold } = require('@noemuch/bridge-ds/dist/lib/cli/setup-orchestrator.js');
+const { scaffold } = require('@kinougarde/bridge-ds/dist/lib/cli/setup-orchestrator.js');
 (async () => {
   const created = await scaffold({
     dsName: '$DS_NAME',
@@ -105,7 +105,7 @@ Report:
 Via Bash:
 ```bash
 node -e "
-const { storeTokenInGitHubSecret } = require('@noemuch/bridge-ds/dist/lib/cli/setup-orchestrator.js');
+const { storeTokenInGitHubSecret } = require('@kinougarde/bridge-ds/dist/lib/cli/setup-orchestrator.js');
 (async () => {
   const result = await storeTokenInGitHubSecret({
     token: process.env._FIGMA_TOKEN_TEMP,

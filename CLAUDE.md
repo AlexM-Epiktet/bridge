@@ -72,7 +72,7 @@ The compiler is TypeScript (v5.0.0+, previously JS). Invocation:
 bridge-ds compile --input <json> --kb <kb-path> --transport <console|official>
 ```
 
-Or programmatically: `import { compile } from "@noemuch/bridge-ds/compiler"`.
+Or programmatically: `import { compile } from "@kinougarde/bridge-ds/compiler"`.
 
 The compiler takes a scene graph JSON with `$token` references and outputs executable code chunks. See `references/compiler-reference.md` for the JSON format.
 

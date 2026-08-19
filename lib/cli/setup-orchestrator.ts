@@ -89,7 +89,7 @@ jobs:
       - name: Run Bridge KB sync
         env:
           FIGMA_TOKEN: \${{ secrets.FIGMA_TOKEN }}
-        run: npx -y @noemuch/bridge-ds@${VERSION} cron --config docs.config.yaml
+        run: npx -y @kinougarde/bridge-ds@${VERSION} cron --config docs.config.yaml
       - name: Open PR if changes
         uses: peter-evans/create-pull-request@v6
         with:

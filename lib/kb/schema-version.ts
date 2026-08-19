@@ -69,7 +69,7 @@ export function assertKBCompatible(kbPath: string): void {
   const version = (parsed as { version?: number }).version ?? 1;
   if (version > CURRENT_KB_SCHEMA_VERSION) {
     throw new KBSchemaError(
-      `KB schema version ${version} is newer than this CLI supports (${CURRENT_KB_SCHEMA_VERSION}). Upgrade @noemuch/bridge-ds.`,
+      `KB schema version ${version} is newer than this CLI supports (${CURRENT_KB_SCHEMA_VERSION}). Upgrade @kinougarde/bridge-ds.`,
       "newer"
     );
   }
