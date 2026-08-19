@@ -2,6 +2,85 @@
 
 All notable changes to Bridge DS are documented here.
 
+## [7.4.0] — 2026-08-19
+
+Bridge becomes bidirectional. Four independent increments: code generation from
+specs, master-component authoring, Figma → spec import, and on-demand drift
+detection. Each is separately usable and separately removable.
+
+The policy that ties them together: **a value is never inferred.** Import and
+codegen both convert what the knowledge base can prove and flag everything else,
+because a plausible-but-wrong token is the one failure mode compiler-enforced
+correctness exists to prevent.
+
+### Added
+
+- **`bridge-ds code` — framework code from a scene graph** (`lib/codegen-web/`).
+  Reuses the compiler's schema → registry → resolve stages and swaps the Figma
+  emitter for a web one; `ResolvedSceneGraph` is the plug-in boundary, so the
+  Figma emitter is untouched. Emits an Angular component, template and Storybook
+  story. Two styling strategies: `tailwind-daisyui` (utility classes derived
+  from the theme lockfile's custom-property names) and `css-vars` (plain
+  declarations). Skill: `coding-from-design`, with Gate C — a screenshot of the
+  rendered component against the Figma board.
+- **Value-aware KB loader** (`lib/kb/values.ts`). `loadRegistry()` drops every
+  token value at load time because the Figma pipeline binds rather than inlines;
+  code generation needs the opposite. This second reader converts Figma RGBA
+  floats to hex, follows `VARIABLE_ALIAS` chains with cycle detection, orders
+  modes, and reads the `theme-values.json` lockfile.
+- **Master components** — `COMPONENT` and `COMPONENT_SET` scene-graph node types,
+  with variant axes, per-variant matrix coordinates, and exposed
+  TEXT/BOOLEAN/INSTANCE_SWAP properties bound to descendant layers. The
+  `component-cspec.yaml` template described these already; nothing consumed it
+  until now.
+- **`upsertComponentEntry()`** (`lib/kb/registry-io.ts`) registers a
+  Bridge-created component in the KB immediately, so it resolves as `$comp/<name>`
+  before any cron run. Entries use the string-encoded property shape, which is
+  the only one `lib/compiler/registry.ts` actually reads.
+- **`bridge-ds import` — Figma node tree → scene graph** (`lib/importer/`).
+  Bound variables and styles convert deterministically; raw values import as-is
+  with a FLAG carrying the layer, field and value, and `suggestion` always null.
+  `SNAPSHOT_FIELDS` is the single source of truth for the extraction script.
+  Skill: `importing-from-figma`.
+- **`bridge-ds drift` — read-only drift probe** (`lib/cli/drift.ts`,
+  `lib/kb/baseline.ts`). Compares registries against a recorded baseline in two
+  directions, local and upstream. Hashing is per-entry and ignores the
+  `generatedAt` envelope, which changes on every extraction. Writes no registry.
+  Skill: `syncing-drift`. Live bidirectional sync was considered and rejected —
+  it would replace the deterministic `make`/`fix`/`done` gates with eventual
+  consistency.
+- New iron law: never infer a token from a raw value.
+
+### Fixed
+
+- **Text-style extraction produced placeholder metrics.** `extractTextStylesFromFigma`
+  hardcoded `Inter / Regular / 14 / 20` for every style, because `/styles`
+  carries no typography data. It now batch-fetches the defining nodes and reads
+  real metrics, mapping numeric weights to style names and preserving
+  percentage line heights. Styles whose node is unreachable are marked
+  `metricsResolved: false` and are refused by the CSS emitter rather than
+  shipped wrong. Registries written before this fix are detected by their
+  uniform metric signature and treated as unresolved.
+- **The cron overwrote `components.json` wholesale**, erasing locally registered
+  components and hand-maintained `angular` code bindings on every refresh.
+  `mergeLocalComponents()` now preserves both; a local component whose key
+  appears upstream is promoted rather than duplicated.
+- **`parseFlags` mis-assigned values after a valueless flag.** It advanced two
+  positions unconditionally, so one boolean flag shifted every later pair.
+- **Skill validation and the overlay snapshot test failed on Windows checkouts**
+  — both compared CRLF-stored files against LF-generated content. Both now
+  normalise line endings first.
+
+### Notes
+
+- On non-Enterprise Figma plans `/variables/local` returns 403, so
+  `variables.json` carries keys with no values. Token → CSS resolution then
+  depends entirely on `theme-values.json`; tokens in neither are reported
+  unbound and generate nothing.
+- When a theme lockfile is present, `code` does **not** emit a token
+  stylesheet: the consumer's stylesheet already defines those properties and is
+  verified in CI, and a second definition would drift.
+
 ## [7.3.1] — 2026-06-03
 
 KB freshness drift-guard added to the `make` skill flow.
