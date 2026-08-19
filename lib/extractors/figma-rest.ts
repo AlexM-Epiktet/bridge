@@ -80,12 +80,28 @@ interface FigmaComponentPropertyDefinition {
   variantOptions?: string[];
 }
 
+/** Typography metrics carried by a TEXT node document. Figma reports
+ * `lineHeightPx` as an absolute pixel value even when the style is authored
+ * as a percentage; `lineHeightUnit` says which the designer chose. */
+interface FigmaTypeStyle {
+  fontFamily?: string;
+  fontPostScriptName?: string | null;
+  fontWeight?: number;
+  fontSize?: number;
+  lineHeightPx?: number;
+  lineHeightPercent?: number;
+  lineHeightUnit?: "PIXELS" | "FONT_SIZE_%" | "INTRINSIC_%";
+  letterSpacing?: number;
+  italic?: boolean;
+}
+
 interface FigmaNodeDocument {
   id: string;
   type: string;
   name?: string;
   children?: Array<{ id: string; type: string }>;
   componentPropertyDefinitions?: Record<string, FigmaComponentPropertyDefinition>;
+  style?: FigmaTypeStyle;
 }
 
 interface FigmaNodesResponse {
@@ -96,6 +112,7 @@ interface FigmaStyle {
   key: string;
   name: string;
   style_type: string;
+  node_id?: string;
 }
 
 interface FigmaStylesResponse {
@@ -328,16 +345,82 @@ export async function extractTextStylesFromFigma(
   );
   const stylesArr = stylesBody.meta?.styles ?? [];
   const textStylesOnly = stylesArr.filter((s) => s.style_type === "TEXT");
-  const textStyles = textStylesOnly.map((s) => ({
-    key: s.key,
-    name: s.name,
-    fontFamily: "Inter",
-    fontStyle: "Regular",
-    fontSize: 14,
-    lineHeight: 20,
-  }));
 
-  return { version: 1, generatedAt: ts, styles: textStyles };
+  // /styles carries no typography metrics — only the node that defines the
+  // style does. Batch-fetch those nodes and read `document.style`. Styles
+  // whose node is unreachable fall back to DEFAULT_TYPE_METRICS, which is
+  // signalled on the entry via `metricsResolved: false` so downstream
+  // consumers (the CSS emitter) can refuse to emit rather than silently
+  // shipping wrong type.
+  const styleNodeIds = textStylesOnly.map((s) => s.node_id).filter((id): id is string => !!id);
+  const styleDocs = styleNodeIds.length
+    ? await fetchNodes(opts.fileKey, styleNodeIds, opts.token, f)
+    : {};
+
+  const textStyles = textStylesOnly.map((s) => {
+    const style = s.node_id ? styleDocs[s.node_id]?.style : undefined;
+    if (!style || style.fontSize == null) {
+      return {
+        key: s.key,
+        name: s.name,
+        ...DEFAULT_TYPE_METRICS,
+        metricsResolved: false,
+      };
+    }
+    return {
+      key: s.key,
+      name: s.name,
+      fontFamily: style.fontFamily ?? DEFAULT_TYPE_METRICS.fontFamily,
+      fontStyle: fontStyleFromWeight(style.fontWeight, style.italic),
+      fontSize: style.fontSize,
+      lineHeight: lineHeightFrom(style),
+      ...(style.letterSpacing != null ? { letterSpacing: style.letterSpacing } : {}),
+      metricsResolved: true,
+    };
+  });
+
+  return {
+    version: 1,
+    generatedAt: ts,
+    styles: textStyles as unknown as TextStyleRegistry["styles"],
+  };
+}
+
+const DEFAULT_TYPE_METRICS = {
+  fontFamily: "Inter",
+  fontStyle: "Regular",
+  fontSize: 14,
+  lineHeight: 20,
+} as const;
+
+/** Figma reports numeric weights; the Plugin API and the style registry use
+ * named styles. Map to the closest standard name, appending Italic when the
+ * node is italic. Unknown weights fall back to Regular. */
+function fontStyleFromWeight(weight: number | undefined, italic: boolean | undefined): string {
+  const names: Record<number, string> = {
+    100: "Thin",
+    200: "ExtraLight",
+    300: "Light",
+    400: "Regular",
+    500: "Medium",
+    600: "SemiBold",
+    700: "Bold",
+    800: "ExtraBold",
+    900: "Black",
+  };
+  const base = weight != null ? (names[weight] ?? "Regular") : "Regular";
+  if (!italic) return base;
+  return base === "Regular" ? "Italic" : `${base} Italic`;
+}
+
+/** Prefer the absolute pixel line height Figma computes. Percentage-authored
+ * styles keep their ratio as a unitless string so CSS stays responsive. */
+function lineHeightFrom(style: FigmaTypeStyle): number | string {
+  if (style.lineHeightUnit === "FONT_SIZE_%" && style.lineHeightPercent != null) {
+    return `${style.lineHeightPercent}%`;
+  }
+  if (style.lineHeightPx != null) return style.lineHeightPx;
+  return DEFAULT_TYPE_METRICS.lineHeight;
 }
 
 export async function extractFromFigma(opts: FigmaExtractOptions): Promise<FigmaExtractResult> {
