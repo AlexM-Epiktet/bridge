@@ -26,5 +26,12 @@ test("snapshot: overlay for archetype:card with finary config", async () => {
     await writeFile(snapshotPath, actual, "utf-8");
     expected = actual;
   }
-  assert.equal(actual.trim(), expected.trim());
+  // The snapshot is compared line-ending-agnostically: git checks this fixture
+  // out with CRLF on Windows while the renderer always emits LF, so a literal
+  // comparison fails on that platform for a difference nobody authored.
+  assert.equal(normalizeEol(actual).trim(), normalizeEol(expected).trim());
 });
+
+function normalizeEol(value: string): string {
+  return value.replace(/\r\n/g, "\n");
+}

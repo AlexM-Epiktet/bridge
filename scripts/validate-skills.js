@@ -40,6 +40,13 @@ const DEAD_PATHS = [
 const failures = [];
 const fail = (msg) => failures.push(msg);
 
+// Line endings are normalised before every check: a Windows checkout stores
+// these files with CRLF, and an LF-only frontmatter regex reports every skill
+// as malformed on that platform.
+function normalizeEol(src) {
+  return src.replace(/\r\n/g, "\n");
+}
+
 function parseFrontmatter(src) {
   const m = src.match(/^---\n([\s\S]*?)\n---/);
   if (!m) return null;
@@ -72,7 +79,7 @@ for (const skill of skills) {
     fail(`Missing SKILL.md for ${skill}`);
     continue;
   }
-  const src = fs.readFileSync(p, "utf8");
+  const src = normalizeEol(fs.readFileSync(p, "utf8"));
   const fm = parseFrontmatter(src);
   if (!fm) {
     fail(`${skill}: missing frontmatter`);
