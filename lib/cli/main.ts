@@ -5,7 +5,7 @@ import { runCron } from "../cron/orchestrator.js";
 import { migrate } from "./migrate.js";
 import { lintCommand } from "./lint.js";
 
-export const VERSION = "7.3.1";
+export const VERSION = "7.4.0";
 
 function printHelp() {
   console.log(`
@@ -14,12 +14,21 @@ bridge-ds v${VERSION} — compiler-driven design system
 Commands:
   setup                  Headless scaffold (typically invoked by 'setup bridge' in Claude Code)
   compile                Compile a scene graph JSON via the local compiler
+  code                   Generate framework code from a scene graph
+  import                 Turn an extracted Figma node tree into a scene graph
+  drift                  Report knowledge-base drift against Figma (read-only)
   doctor                 Run diagnostics (config, connectivity, health)
   extract --headless     Extract DS via Figma REST (requires FIGMA_TOKEN)
   migrate                Migrate a legacy KB to the current schema
   cron                   Run the cron orchestrator (CI entry point)
   lint                   Lint *.cspec.yaml files against the lint config
   help | version
+
+  code   --input <scene.json> --kb <path> [--out <dir>] [--name <n>]
+         [--strategy tailwind-daisyui|css-vars] [--doc-language en|fr]
+         [--base-class <Name>] [--base-class-import <path>] [--no-stories]
+  import --tree <snapshot.json> --kb <path> [--out <scene.json>] [--name <n>]
+  drift  --kb <path> [--config <docs.config.yaml>] [--update-baseline]
 `);
 }
 
@@ -41,6 +50,59 @@ export async function main() {
       case "compile": {
         const { runCompileCli } = await import("../compiler/cli.js");
         await runCompileCli([sub, ...rest].filter((x): x is string => typeof x === "string"));
+        return;
+      }
+      case "code": {
+        const args = parseFlags([sub, ...rest]);
+        const input = args.get("input");
+        if (!input) throw new Error("`code` requires --input <scene.json>");
+        const { codeCommand, formatCodeResult } = await import("./code.js");
+        const outDir = args.get("out");
+        const result = await codeCommand({
+          inputPath: input,
+          kbPath: args.get("kb") ?? "bridge-ds",
+          ...(outDir ? { outDir } : {}),
+          ...(args.has("name") ? { name: args.get("name")! } : {}),
+          ...(args.has("strategy")
+            ? { strategy: args.get("strategy") as "tailwind-daisyui" | "css-vars" }
+            : {}),
+          ...(args.has("doc-language")
+            ? { docLanguage: args.get("doc-language") as "en" | "fr" }
+            : {}),
+          ...(args.has("base-class") ? { baseClass: args.get("base-class")! } : {}),
+          ...(args.has("base-class-import")
+            ? { baseClassImport: args.get("base-class-import")! }
+            : {}),
+          ...(process.argv.includes("--no-stories") ? { emitStories: false } : {}),
+        });
+        console.log(formatCodeResult(result, outDir));
+        process.exit(result.exitCode);
+        return;
+      }
+      case "import": {
+        const args = parseFlags([sub, ...rest]);
+        const tree = args.get("tree");
+        if (!tree) throw new Error("`import` requires --tree <snapshot.json>");
+        const { importCommand } = await import("./import.js");
+        const result = await importCommand({
+          treePath: tree,
+          kbPath: args.get("kb") ?? "bridge-ds",
+          ...(args.has("out") ? { outPath: args.get("out")! } : {}),
+          ...(args.has("name") ? { name: args.get("name")! } : {}),
+        });
+        process.exit(result.exitCode);
+        return;
+      }
+      case "drift": {
+        const args = parseFlags([sub, ...rest]);
+        const { driftCommand, formatDriftReport } = await import("./drift.js");
+        const report = await driftCommand({
+          kbPath: args.get("kb") ?? "bridge-ds",
+          ...(args.has("config") ? { configPath: args.get("config")! } : {}),
+          ...(process.argv.includes("--update-baseline") ? { updateBaseline: true } : {}),
+        });
+        console.log(formatDriftReport(report));
+        process.exit(report.exitCode);
         return;
       }
       case "doctor":
@@ -99,12 +161,25 @@ export async function main() {
   }
 }
 
+/**
+ * Parse `--key value` pairs, tolerating valueless boolean flags.
+ *
+ * A boolean flag is detected by its neighbour: if the next token is itself a
+ * flag (or absent), the current one takes an empty value and only one position
+ * is consumed. Advancing blindly by two would let a single boolean flag shift
+ * every later pair by one, silently mis-assigning values.
+ */
 function parseFlags(rest: readonly (string | undefined)[]): Map<string, string> {
   const args = new Map<string, string>();
-  for (let i = 0; i < rest.length; i += 2) {
+  for (let i = 0; i < rest.length; i++) {
     const k = rest[i];
-    if (k?.startsWith("--")) {
-      args.set(k.slice(2), rest[i + 1] ?? "");
+    if (!k?.startsWith("--")) continue;
+    const next = rest[i + 1];
+    if (next === undefined || next.startsWith("--")) {
+      args.set(k.slice(2), "");
+    } else {
+      args.set(k.slice(2), next);
+      i++;
     }
   }
   return args;
