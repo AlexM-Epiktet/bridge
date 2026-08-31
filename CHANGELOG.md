@@ -2,6 +2,41 @@
 
 All notable changes to Bridge DS are documented here.
 
+## [7.6.0] — 2026-08-31
+
+### Added
+
+- **Deep overrides on `INSTANCE` nodes.** `overrides[]` — until now a CLONE-only
+  field — is accepted on INSTANCE. It reaches descendants a component does not
+  expose as component properties, which is the normal shape of a DS data
+  component: a table's cells and a rail's items are nested layers, so the only
+  way to render real content used to be to detach the instance or rebuild it out
+  of atoms. Both cut the screen off from the design system. This writes ordinary
+  Figma overrides — the instance keeps its link to the master.
+
+- **`find.nth` selector.** Repeated layer names are the norm inside a DS
+  component (five cells named `am-table-cell-value`, six items named
+  `am-rail-item`). The finder was `findOne`, so every override landed on the
+  first match, silently. `nth` is 0-based, in document order, and validated as a
+  non-negative integer. One `findAll` scan is emitted per distinct predicate, not
+  per override — `am-table` is ~3 000 nodes.
+
+### Fixed
+
+- **`set.characters` no longer throws on a nested TEXT node.** Writing to a TEXT
+  node requires ITS OWN font to be loaded, and a node reached by a deep override
+  is not necessarily built from a font the scene graph declares — so the
+  chunk-level loader did not cover it. Text now goes through a `setChars` helper
+  that loads the node's actual fonts (including a mixed-font range) first. This
+  also fixes the pre-existing CLONE path.
+
+- **`set.fill` was dropped in silence.** `resolve` never walked `overrides`, so
+  the token stayed a raw `"$…"` string, `tokenVar()` returned null in codegen and
+  the fill was never applied — and the variable was never added to the chunk's
+  imports either. Override fills are now resolved and imported like any other
+  token, and an unknown one fails the compile with `RESOLVE_TOKEN_NOT_FOUND`
+  instead of vanishing.
+
 ## [7.5.1] — 2026-08-19
 
 ### Changed

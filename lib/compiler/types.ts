@@ -121,7 +121,9 @@ export interface SceneNode {
   // CLONE
   sourceNodeId?: string;
   sourceRef?: string;
-  overrides?: CloneOverride[];
+
+  // CLONE / INSTANCE — deep overrides on descendants.
+  overrides?: NodeOverride[];
 
   // REPEAT
   count?: number;
@@ -152,8 +154,22 @@ export interface SceneNode {
   [extra: string]: unknown;
 }
 
-export interface CloneOverride {
-  find?: { name?: string; type?: string };
+/**
+ * A deep override applied to a descendant of a CLONE or an INSTANCE.
+ *
+ * `find` locates the descendant by layer name, optionally narrowed by node
+ * type. When several descendants share a name — a table's identical
+ * `am-table-cell-value` cells, a rail's six `am-rail-item` layers — `nth`
+ * picks one positionally (0-based, document order); without it the FIRST
+ * match wins, which is a silent mis-target on repeated names.
+ *
+ * This is the only way to reach content a component does not expose as a
+ * component property. It writes an ordinary Figma override: the instance
+ * keeps its link to the master. It is NOT a licence to rebuild a component
+ * from parts.
+ */
+export interface NodeOverride {
+  find?: { name?: string; type?: string; nth?: number };
   set?: {
     characters?: string;
     fill?: string | ResolvedToken;
@@ -161,6 +177,9 @@ export interface CloneOverride {
     properties?: Record<string, unknown>;
   };
 }
+
+/** @deprecated Overrides are no longer CLONE-only — use {@link NodeOverride}. */
+export type CloneOverride = NodeOverride;
 
 export interface SceneGraph {
   version: string;

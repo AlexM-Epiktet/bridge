@@ -318,6 +318,8 @@ function validateInstance(node: RawNode, path: string): CompilerError[] {
     );
   }
 
+  errors.push(...validateOverrides(node, path));
+
   return errors;
 }
 
@@ -335,42 +337,67 @@ function validateClone(node: RawNode, path: string): CompilerError[] {
     );
   }
 
+  errors.push(...validateOverrides(node, path));
+
+  return errors;
+}
+
+/**
+ * `overrides` is shared by CLONE and INSTANCE: both reach descendants the
+ * component itself does not expose. Validated in one place so the two node
+ * types cannot drift apart.
+ */
+function validateOverrides(node: RawNode, path: string): CompilerError[] {
+  const errors: CompilerError[] = [];
+  const name = String(node["name"] ?? "");
   const overrides = node["overrides"];
-  if (overrides !== undefined) {
-    if (!Array.isArray(overrides)) {
+  if (overrides === undefined) return errors;
+
+  if (!Array.isArray(overrides)) {
+    errors.push(
+      new CompilerError("PARSE_MISSING_FIELD", {
+        message: 'Field "overrides" must be an array on node "' + name + '"',
+        node: name,
+        path: path + ".overrides",
+      })
+    );
+    return errors;
+  }
+
+  overrides.forEach((override: unknown, i: number) => {
+    const oPath = path + ".overrides[" + i + "]";
+    const find = field(override, "find");
+    if (!find || !field(find, "name")) {
       errors.push(
         new CompilerError("PARSE_MISSING_FIELD", {
-          message: 'Field "overrides" must be an array on node "' + name + '"',
+          message: "Override at " + oPath + ' must have "find.name"',
           node: name,
-          path: path + ".overrides",
+          path: oPath + ".find.name",
         })
       );
-    } else {
-      overrides.forEach((override: unknown, i: number) => {
-        const oPath = path + ".overrides[" + i + "]";
-        const find = field(override, "find");
-        if (!find || !field(find, "name")) {
-          errors.push(
-            new CompilerError("PARSE_MISSING_FIELD", {
-              message: "Override at " + oPath + ' must have "find.name"',
-              node: name,
-              path: oPath + ".find.name",
-            })
-          );
-        }
-        const set = field(override, "set");
-        if (!set || !isObject(set)) {
-          errors.push(
-            new CompilerError("PARSE_MISSING_FIELD", {
-              message: "Override at " + oPath + ' must have a "set" object',
-              node: name,
-              path: oPath + ".set",
-            })
-          );
-        }
-      });
     }
-  }
+    const nth = find ? field(find, "nth") : undefined;
+    if (nth !== undefined && (typeof nth !== "number" || !Number.isInteger(nth) || nth < 0)) {
+      errors.push(
+        new CompilerError("PARSE_MISSING_FIELD", {
+          message:
+            "Override at " + oPath + ' must have a non-negative integer "find.nth" (0-based)',
+          node: name,
+          path: oPath + ".find.nth",
+        })
+      );
+    }
+    const set = field(override, "set");
+    if (!set || !isObject(set)) {
+      errors.push(
+        new CompilerError("PARSE_MISSING_FIELD", {
+          message: "Override at " + oPath + ' must have a "set" object',
+          node: name,
+          path: oPath + ".set",
+        })
+      );
+    }
+  });
 
   return errors;
 }

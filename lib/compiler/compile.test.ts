@@ -209,3 +209,128 @@ test("compile() reports PARSE_INVALID_JSON for malformed input strings", () => {
     kb.cleanup();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Deep overrides on INSTANCE nodes
+//
+// A DS component only exposes what its master declares. A table's cells and a
+// rail's items are nested layers, so without these the agent's only options
+// were to detach the component or rebuild it out of atoms — both of which cut
+// the screen off from the design system.
+// ---------------------------------------------------------------------------
+
+function instanceGraph(overrides: unknown): object {
+  return {
+    version: "3.0",
+    metadata: { name: "TestRoot", width: 800, height: 600 },
+    fonts: [{ family: "Inter", style: "Regular" }],
+    nodes: [
+      {
+        type: "FRAME",
+        name: "Card",
+        layout: "VERTICAL",
+        primaryAxisSizing: "AUTO",
+        counterAxisSizing: "FIXED",
+        width: 400,
+        height: 200,
+        children: [{ type: "INSTANCE", name: "Cta", component: "Button", overrides }],
+      },
+    ],
+  };
+}
+
+test("INSTANCE overrides reach a nested layer the component does not expose", () => {
+  const kb = writeTempKb();
+  try {
+    const result = compile({
+      input: instanceGraph([
+        { find: { name: "Label", type: "TEXT" }, set: { characters: "Envoyer" } },
+      ]),
+      kbPath: kb.kbPath,
+      transport: "console",
+    });
+
+    assert.equal(result.success, true, JSON.stringify(result.errors));
+    const code = result.chunks.map((c) => c.code).join("\n");
+    assert.ok(code.includes('.findOne(function(n) { return n.name === "Label"'), code);
+    assert.ok(code.includes("await setChars("), "text must go through the font-loading helper");
+    assert.ok(code.includes('"Envoyer"'), code);
+  } finally {
+    kb.cleanup();
+  }
+});
+
+test("find.nth targets the Nth match — repeated layer names are the norm in a DS", () => {
+  const kb = writeTempKb();
+  try {
+    const result = compile({
+      input: instanceGraph([
+        { find: { name: "am-table-cell-value", nth: 2 }, set: { characters: "Cambrai" } },
+      ]),
+      kbPath: kb.kbPath,
+      transport: "console",
+    });
+
+    assert.equal(result.success, true, JSON.stringify(result.errors));
+    const code = result.chunks.map((c) => c.code).join("\n");
+    assert.ok(code.includes(".findAll("), "nth must enumerate, not take the first hit");
+    assert.ok(/\[2\] \|\| null/.test(code), code);
+    assert.ok(!code.includes(".findOne("), "findOne would silently write to cell 0");
+  } finally {
+    kb.cleanup();
+  }
+});
+
+test("an override fill is resolved and imported like any other token", () => {
+  const kb = writeTempKb();
+  try {
+    const result = compile({
+      input: instanceGraph([{ find: { name: "Bg" }, set: { fill: "$color/bg/primary" } }]),
+      kbPath: kb.kbPath,
+      transport: "console",
+    });
+
+    assert.equal(result.success, true, JSON.stringify(result.errors));
+    const code = result.chunks.map((c) => c.code).join("\n");
+    assert.ok(code.includes("VariableID:1:1"), "the variable must be imported by the chunk");
+    assert.ok(code.includes(".fills = mf("), code);
+  } finally {
+    kb.cleanup();
+  }
+});
+
+test("an unknown token in an override fails the compile instead of vanishing", () => {
+  const kb = writeTempKb();
+  try {
+    const result = compile({
+      input: instanceGraph([{ find: { name: "Bg" }, set: { fill: "$color/bg/does-not-exist" } }]),
+      kbPath: kb.kbPath,
+      transport: "console",
+    });
+
+    assert.equal(result.success, false);
+    const codes = result.errors.map((e) => e.code);
+    assert.ok(codes.includes("RESOLVE_TOKEN_NOT_FOUND"), codes.join(","));
+  } finally {
+    kb.cleanup();
+  }
+});
+
+test("find.nth must be a non-negative integer", () => {
+  const kb = writeTempKb();
+  try {
+    const result = compile({
+      input: instanceGraph([{ find: { name: "Cell", nth: -1 }, set: { characters: "x" } }]),
+      kbPath: kb.kbPath,
+      transport: "console",
+    });
+
+    assert.equal(result.success, false);
+    assert.ok(
+      result.errors.some((e) => String(e.path ?? "").endsWith("find.nth")),
+      JSON.stringify(result.errors)
+    );
+  } finally {
+    kb.cleanup();
+  }
+});

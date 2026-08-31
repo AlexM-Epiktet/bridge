@@ -8,7 +8,7 @@ import type {
   ImportEntry,
   ResolvedNode,
   ResolvedToken,
-  CloneOverride,
+  NodeOverride,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -378,6 +378,14 @@ function emitInstance(
   if (node._resolvedSwaps) {
     emitInstanceSwaps(node._resolvedSwaps, varName, importNames, lines);
   }
+
+  // Deep overrides — the only way to reach content a component does not expose
+  // as a property (a table's cells, a rail's items). This writes ordinary Figma
+  // overrides: the instance keeps its link to the master. It is NOT a licence to
+  // rebuild a DS component out of atoms.
+  if (node.overrides && node.overrides.length > 0) {
+    emitOverrides(node.overrides, varName, importNames, lines);
+  }
 }
 
 function emitClone(
@@ -417,7 +425,7 @@ function emitClone(
   emitAbsolute(node, varName, lines);
 
   if (node.overrides && node.overrides.length > 0) {
-    emitCloneOverrides(node.overrides, varName, importNames, lines);
+    emitOverrides(node.overrides, varName, importNames, lines);
   }
 }
 
@@ -884,37 +892,49 @@ function emitInstanceSwaps(
   }
 }
 
-function emitCloneOverrides(
-  overrides: readonly CloneOverride[],
-  cloneVar: string,
+function emitOverrides(
+  overrides: readonly NodeOverride[],
+  hostVar: string,
   importNames: Map<string, string>,
   lines: string[]
 ): void {
+  // One scan per distinct predicate, not one per override: filling a table means
+  // a dozen overrides against the same layer name, and findAll walks the whole
+  // instance subtree (am-table is ~3 000 nodes).
+  const scanVars = new Map<string, string>();
+
   for (let i = 0; i < overrides.length; i++) {
     const ov = overrides[i]!;
     const find = ov.find;
     const set = ov.set;
     if (!find || !set) continue;
 
-    const ovVar = "ov_" + i + "_" + cloneVar;
+    const ovVar = "ov_" + i + "_" + hostVar;
     const findParts: string[] = ["n.name === " + JSON.stringify(find.name)];
     if (find.type) {
       findParts.push("n.type === " + JSON.stringify(find.type));
     }
-    lines.push(
-      "var " +
-        ovVar +
-        " = " +
-        cloneVar +
-        ".findOne(function(n) { return " +
-        findParts.join(" && ") +
-        "; });"
-    );
+    const predicate = "function(n) { return " + findParts.join(" && ") + "; }";
+
+    if (typeof find.nth === "number") {
+      // Repeated layer names are the NORM inside a DS component — five cells all
+      // named am-table-cell-value, six items all named am-rail-item. findOne
+      // would silently write to the first one every time.
+      let scanVar = scanVars.get(predicate);
+      if (!scanVar) {
+        scanVar = "scan_" + scanVars.size + "_" + hostVar;
+        scanVars.set(predicate, scanVar);
+        lines.push("var " + scanVar + " = " + hostVar + ".findAll(" + predicate + ");");
+      }
+      lines.push("var " + ovVar + " = " + scanVar + "[" + find.nth + "] || null;");
+    } else {
+      lines.push("var " + ovVar + " = " + hostVar + ".findOne(" + predicate + ");");
+    }
 
     const guard = "if (" + ovVar + ") ";
 
     if (set.characters != null) {
-      lines.push(guard + ovVar + ".characters = " + JSON.stringify(set.characters) + ";");
+      lines.push(guard + "await setChars(" + ovVar + ", " + JSON.stringify(set.characters) + ");");
     }
     if (set.fill) {
       const fillVar = tokenVar(set.fill, importNames);
