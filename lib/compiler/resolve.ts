@@ -7,6 +7,7 @@ import type { Registry } from "./registry.js";
 import type {
   ImportBundle,
   ImportEntry,
+  NodeOverride,
   ResolvedComponent,
   ResolvedKind,
   ResolvedNode,
@@ -591,6 +592,11 @@ function collectImports(nodes: readonly ResolvedNode[]): ImportBundle {
           visit(node._resolvedSwaps![k]);
         });
       }
+      if (Array.isArray(node.overrides)) {
+        (node.overrides as NodeOverride[]).forEach((ov) => {
+          if (ov && ov.set) visit(ov.set.fill);
+        });
+      }
       if (Array.isArray(node.children)) walkForImports(node.children);
     });
   }
@@ -660,6 +666,25 @@ export function resolve(graph: SceneGraph, registry: Registry): ResolveResult {
             errors.push(result.error);
           }
         }
+      }
+
+      // Deep overrides (CLONE / INSTANCE) carry a token in `set.fill` like any
+      // other field. Without this pass it stayed a raw "$…" string, tokenVar()
+      // returned null in codegen, and the fill override vanished in silence.
+      if (Array.isArray(node.overrides)) {
+        node.overrides.forEach((ov, i) => {
+          const value = ov && ov.set ? ov.set.fill : undefined;
+          if (isTokenRef(value)) {
+            const result = resolveTokenRef(value, registry);
+            if (result.resolved) {
+              ov.set!.fill = result.resolved;
+            } else if (result.error) {
+              result.error.node = result.error.node ?? nodeName;
+              result.error.path = result.error.path ?? nodePath + ".overrides[" + i + "].set.fill";
+              errors.push(result.error);
+            }
+          }
+        });
       }
 
       // Resolve INSTANCE component references

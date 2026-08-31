@@ -89,7 +89,7 @@ All nodes share these base properties: `type`, `name`, `id?`, `children?`, `fill
 |------|----------|---------------|---------|
 | **FRAME** | `name` | `layout`, `gap`, `padding`, `fill`, `stroke`, `radius`, `clip`, `width`, `height`, `primaryAxisSizing`, `counterAxisSizing`, `primaryAxisAlign`, `counterAxisAlign`, `effectStyle`, `children` | `figma.createFrame()` |
 | **TEXT** | `name`, `characters`, `textStyle` | `fill`, `autoResize`, `maxLines` | `figma.createText()` |
-| **INSTANCE** | `name`, `component` | `variant`, `properties`, `swaps` | `importComponentByKeyAsync` / `importComponentSetByKeyAsync` + `createInstance()` |
+| **INSTANCE** | `name`, `component` | `variant`, `properties`, `swaps`, `overrides[]` | `importComponentByKeyAsync` / `importComponentSetByKeyAsync` + `createInstance()` |
 | **CLONE** | `name`, one of `sourceNodeId` / `sourceRef` | `overrides[]` (each: `find.name`, `set.*`) | `node.clone()` |
 | **RECTANGLE** | `name`, `width`, `height` | `fill`, `stroke`, `strokeWeight`, `strokeAlign`, `radius` | `figma.createRectangle()` |
 | **ELLIPSE** | `name`, `width`, `height` | `fill`, `stroke`, `strokeWeight` | `figma.createEllipse()` |
@@ -151,7 +151,34 @@ All nodes share these base properties: `type`, `name`, `id?`, `children?`, `fill
 - `variant`: object of variant property keys to values. The compiler validates against known variant options.
 - `properties`: text and boolean overrides. The compiler handles hash-suffix property key resolution.
 - `swaps`: instance swap overrides. Values are component names resolved to keys.
+- `overrides`: deep overrides on descendants the component does not expose as
+  properties — same shape as on CLONE (see below). This is the escape hatch for
+  a DS component whose content lives in nested layers (a table's cells, a rail's
+  items). It writes ordinary Figma overrides, so the instance KEEPS its link to
+  the master. It is not a licence to rebuild a component out of atoms, and it is
+  never a reason to detach.
 - INSTANCE nodes CANNOT have `children` (compiler error).
+
+```json
+{
+  "type": "INSTANCE",
+  "name": "Table",
+  "component": "am-table",
+  "variant": { "pagination": "Oui", "état": "Rempli", "colonnes": "4" },
+  "overrides": [
+    { "find": { "name": "am-table-header-cell", "nth": 0 },
+      "set": { "properties": { "Libellé#11402:5": "Intervenant" } } },
+    { "find": { "name": "am-table-cell-value", "nth": 1 },
+      "set": { "properties": { "Valeur#11402:7": "Cambrai" } } },
+    { "find": { "name": "badge-fg", "type": "TEXT", "nth": 0 },
+      "set": { "characters": "Planifié" } }
+  ]
+}
+```
+
+`variant` keys must be listed in the SAME ORDER as the variant's name in Figma:
+the compiler joins them into `"k=v, k=v"` and matches that string. A mismatch
+falls back to `defaultVariant` instead of failing — check the render.
 
 ### CLONE Node
 
@@ -171,6 +198,22 @@ All nodes share these base properties: `type`, `name`, `id?`, `children?`, `fill
 
 - Use `sourceRef` to reference another node's `id` field (local clone).
 - Use `sourceNodeId` for Figma node IDs (reference-based or unpublished components).
+
+### Override selectors (CLONE and INSTANCE)
+
+- `find.name` is required; `find.type` narrows by node type.
+- `find.nth` (0-based, document order) picks among several matches. Repeated
+  layer names are the NORM inside a DS component — five cells all named
+  `am-table-cell-value`, six items all named `am-rail-item` — and WITHOUT `nth`
+  the first match wins every time, silently.
+- `set` accepts `characters` (TEXT node — its own font is loaded first),
+  `fill` (a `$token`, resolved and imported like any other), `visible`, and
+  `properties` (forwarded to `setProperties` — the right tool for a nested
+  INSTANCE that does expose component properties).
+- Indices are per layer name, and different layer names do not line up: a
+  4-column `am-table` has 4 `am-table-header-cell` but only 3
+  `am-table-cell-value` per row, because the badge column uses a different
+  cell component. Read the anatomy before counting.
 
 ---
 
@@ -214,7 +257,8 @@ These are the rules Claude must follow when producing scene graph JSON. The comp
 2. **Every color** (fill, stroke) MUST be a `$token` ref (never hex values).
 3. **Every TEXT node** MUST have a `textStyle` ref (never hardcode font properties).
 4. **DS components** MUST be INSTANCE nodes (never recreate as FRAME/RECTANGLE).
-5. **INSTANCE nodes** CANNOT have children — use `properties` and `swaps` for overrides.
+5. **INSTANCE nodes** CANNOT have children — use `properties`, `swaps`, and
+   `overrides[]` (deep, keeps the master link) instead.
 6. **Node names** become Figma layer names — make them descriptive and unique within their parent.
 7. **Use REPEAT** for lists and grids with repeated structure.
 8. **Use CONDITIONAL** sparingly — prefer resolving conditions before producing the scene graph.

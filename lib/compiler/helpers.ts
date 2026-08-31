@@ -36,6 +36,20 @@ export const HELPER_BLOCK: string = [
   "    return k.split('#')[0] === prefix && defs[k].type === type;",
   "  });",
   "}",
+  "",
+  "// Writing to a TEXT node throws unless ITS OWN font is loaded, and a node",
+  "// reached by a deep override is not necessarily built from a font the scene",
+  "// graph declares — so the chunk-level font loader does not cover it.",
+  "async function setChars(n, v) {",
+  '  if (!n || n.type !== "TEXT") return false;',
+  "  var len = n.characters.length;",
+  "  var fonts = len > 0 ? n.getRangeAllFontNames(0, len) : [n.fontName];",
+  "  for (var i = 0; i < fonts.length; i++) {",
+  "    if (fonts[i] && fonts[i] !== figma.mixed) await figma.loadFontAsync(fonts[i]);",
+  "  }",
+  "  n.characters = v;",
+  "  return true;",
+  "}",
 ].join("\n");
 
 export interface FontRef {
