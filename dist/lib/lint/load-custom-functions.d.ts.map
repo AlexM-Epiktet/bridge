@@ -1,0 +1,1 @@
+{"version":3,"file":"load-custom-functions.d.ts","sourceRoot":"","sources":["../../../lib/lint/load-custom-functions.ts"],"names":[],"mappings":"AAcA,MAAM,MAAM,cAAc,GAAG;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,EAAE,EAAE,CAAC,GAAG,IAAI,EAAE,OAAO,EAAE,KAAK,OAAO,CAAA;CAAE,CAAC;AAWnF,wBAAsB,mBAAmB,CACvC,YAAY,EAAE,MAAM,GAAG,SAAS,GAC/B,OAAO,CAAC,cAAc,EAAE,CAAC,CA0C3B"}

@@ -1,0 +1,65 @@
+# lib/lint/builtin/tokens/dtcg-compliance/rule.yaml
+# Validate any embedded design-token definitions against the W3C Design Tokens
+# Community Group format (2025.10 revision). Keeps Bridge KB exports portable
+# to other DTCG-aware tools (Style Dictionary, Tokens Studio, etc.).
+rules:
+  dtcg-compliance:
+    description: "Token files conform to the W3C DTCG 2025.10 format."
+    given: "$.tokenDefinitions"
+    then:
+      function: schema
+      functionOptions:
+        # Recursive DTCG mini-schema: every node is either
+        #   - a leaf token (has $value AND $type), OR
+        #   - a group (no $-prefixed keys; children recurse via $defs/dtcgNode).
+        # `oneOf` enforces the dichotomy: any node with `$value` MUST also
+        # declare `$type` (else it's malformed), and any node WITHOUT `$value`
+        # must be a clean group with no $-prefixed leaks.
+        schema:
+          $ref: "#/$defs/dtcgNode"
+          $defs:
+            dtcgNode:
+              type: object
+              oneOf:
+                - # leaf token
+                  type: object
+                  required: [$value, $type]
+                  properties:
+                    $type:
+                      type: string
+                      enum:
+                        - color
+                        - dimension
+                        - fontFamily
+                        - fontWeight
+                        - duration
+                        - cubicBezier
+                        - number
+                        - string
+                        - boolean
+                        - strokeStyle
+                        - border
+                        - transition
+                        - shadow
+                        - gradient
+                        - typography
+                    $description: { type: string }
+                    $extensions: { type: object }
+                - # group (no $-prefixed keys, recurses)
+                  type: object
+                  patternProperties:
+                    "^[^$].*$":
+                      $ref: "#/$defs/dtcgNode"
+                  additionalProperties: false
+    severity: warn
+    meta:
+      bridgeApi: "1.x"
+      category: tokens
+      surface:
+        - lint-time
+      appliesTo: []
+      status: active
+      rationale: "DTCG conformance keeps Bridge token exports portable to Style Dictionary, Tokens Studio, and other community tooling."
+      example: "tokenDefinitions: { color: { primary: { $value: '#0066ff', $type: 'color' } } }"
+      prompt: "Author embedded token definitions in DTCG 2025.10 shape: every leaf has `$value` and `$type`, groups nest via plain keys, and aliases use the `{group.name}` syntax. See https://design-tokens.github.io/community-group/format/"
+      since: "1.0.0"

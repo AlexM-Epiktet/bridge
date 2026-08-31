@@ -5,7 +5,7 @@ import { runCron } from "../cron/orchestrator.js";
 import { migrate } from "./migrate.js";
 import { lintCommand } from "./lint.js";
 
-export const VERSION = "7.6.0";
+export const VERSION = "7.6.1";
 
 function printHelp() {
   console.log(`

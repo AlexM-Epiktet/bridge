@@ -2,6 +2,27 @@
 
 All notable changes to Bridge DS are documented here.
 
+## [7.6.1] — 2026-08-31
+
+### Fixed
+
+- **The compiler now ships built.** `dist/` is committed instead of gitignored,
+  because a deployed plugin can never build it. A plugin install materialises the
+  `package.json` `files` allowlist — `bin/`, `dist/`, `skills/`, `hooks/` — and
+  therefore carries no `lib/`, `scripts/`, `tsconfig.json` or `packages/`. Running
+  `npm run build` there fails at `prebuild` with `No workspaces found!`, and would
+  fail at `tsc` for want of sources even if it got past that. Deployments were
+  working only where a stale build happened to sit in the local marketplace clone
+  and got picked up by the pack; on a fresh machine the clone has no `dist/`, so
+  `bridge-ds compile` — Gate A — was simply absent. Committing the build output is
+  the deliberate trade: it removes the on-machine build step, its network, its
+  npm, and its 2-to-5-minute failure surface.
+
+- **CI fails on a stale `dist/`.** New `dist-fresh` job rebuilds and diffs the
+  committed output, so a shipped compiler can never lag the sources it was built
+  from. Sourcemaps are path-relative (`sourceRoot` empty), which keeps the build
+  reproducible across machines.
+
 ## [7.6.0] — 2026-08-31
 
 ### Added
