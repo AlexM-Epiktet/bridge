@@ -2,6 +2,32 @@
 
 All notable changes to Bridge DS are documented here.
 
+## [7.6.2] — 2026-08-31
+
+### Fixed
+
+- **Plugin installs no longer fail on Windows.** `npm ci` is run inside the
+  installed copy, and the `workspaces: ["packages/*"]` declaration made it
+  create a symlink for `@kinougarde/bridge-ds-rule-api`. Windows refuses that
+  without elevation or Developer Mode, so the install died with
+  `EPERM: operation not permitted, symlink` on `packages/rule-api` —
+  leaving a `node_modules` truncated at the scoped packages (the workspace link
+  is created last among them) and no `package.json` at all. The compiler then
+  crashed on `Cannot find module 'picocolors'`, so 7.6.1 shipped its `dist/`
+  correctly and still could not run.
+
+  Nothing needed the workspace. `@kinougarde/bridge-ds-rule-api` is imported
+  with `import type` in four files, is erased at compile time, and was never a
+  runtime dependency. `workspaces` is dropped; `build:deps` calls
+  `tsc -p packages/rule-api` directly, and a tsconfig `paths` entry resolves the
+  declarations. Two failure modes go with it — the same declaration was what
+  made `npm run build` fail at `prebuild` with `No workspaces found!` inside an
+  installed plugin.
+
+  Measured after the change: `npm ci` completes (248 packages, no `@kinougarde`
+  link), `npm run build` and `typecheck` pass, `dist/` shows no drift, 253/253
+  tests pass.
+
 ## [7.6.1] — 2026-08-31
 
 ### Fixed

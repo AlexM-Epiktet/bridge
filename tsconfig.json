@@ -13,7 +13,17 @@
     "sourceMap": true,
     "outDir": "dist",
     "rootDir": ".",
-    "types": ["node"]
+    "types": ["node"],
+    // `@kinougarde/bridge-ds-rule-api` is imported with `import type` only, so it
+    // is erased at compile time and is deliberately NOT a runtime dependency.
+    // It used to resolve through an npm workspace symlink in node_modules, which
+    // `npm ci` cannot create on Windows without elevation (EPERM) — that broke
+    // every plugin install. Resolving it here instead keeps the types available
+    // with no workspace and no symlink. `prebuild` (build:deps) emits these
+    // declarations; packages/*/dist is gitignored, so they are always built.
+    "paths": {
+      "@kinougarde/bridge-ds-rule-api": ["./packages/rule-api/dist/index.d.ts"]
+    }
   },
   "include": ["lib/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]

@@ -1,6 +1,6 @@
 {
   "name": "@kinougarde/bridge-ds",
-  "version": "7.6.1",
+  "version": "7.6.2",
   "description": "Compiler-driven design generation in Figma — 100% design system compliant. Compiles component specs into verified Figma output via MCP.",
   "main": "dist/lib/cli/main.js",
   "types": "dist/lib/cli/main.d.ts",
@@ -36,11 +36,8 @@
   "engines": {
     "node": ">=20"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
-    "build:deps": "npm run build --workspaces --if-present",
+    "build:deps": "tsc -p packages/rule-api",
     "prebuild": "npm run build:deps",
     "build": "tsc && node scripts/copy-builtin-resources.js",
     "build:watch": "tsc --watch",
