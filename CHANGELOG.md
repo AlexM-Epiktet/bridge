@@ -21,6 +21,17 @@ All notable changes to Bridge DS are documented here.
   non-negative integer. One `findAll` scan is emitted per distinct predicate, not
   per override — `am-table` is ~3 000 nodes.
 
+### Changed
+
+- **`publishConfig.access = "public"`.** A scoped package defaults to a
+  restricted (paid-org) publish, so the first `npm publish` of this fork would
+  either fail or land private. This is a prerequisite, not a cosmetic: the
+  workstation shim now falls back to `npx -y @kinougarde/bridge-ds@<version>`
+  when the plugin cache carries no built compiler — which is the normal state of
+  a cache freshly populated by a plugin update, because `dist/` is gitignored
+  while the skills ship in git. Without the published package, an updated plugin
+  hands the agent references that promise a capability whose tool is broken.
+
 ### Fixed
 
 - **`set.characters` no longer throws on a nested TEXT node.** Writing to a TEXT
