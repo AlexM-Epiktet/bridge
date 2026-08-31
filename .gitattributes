@@ -1,0 +1,23 @@
+# Normalise every text file to LF, in the index AND in the working tree.
+#
+# `eol=lf` is deliberate rather than plain `text=auto`. dist/ is committed build
+# output (see .gitignore), and `scripts/copy-builtin-resources.js` copies YAML
+# and JSON straight from lib/ into it. On a CRLF working tree those copies land
+# in dist/ with CRLF, so the build stops being reproducible and CI's dist-fresh
+# job fails on 80 files whose every line "changed". Forcing LF on checkout keeps
+# a Windows build byte-identical to a Linux one.
+#
+# It also keeps Prettier (endOfLine: lf) honest on Windows checkouts, and the
+# shell hooks in hooks/ valid — a CRLF shebang line is not executable.
+* text=auto eol=lf
+
+# Binaries: never touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

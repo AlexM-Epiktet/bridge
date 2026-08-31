@@ -1,0 +1,873 @@
+"use strict";
+// ---------------------------------------------------------------------------
+// codegen.ts — transforms a resolved scene graph into Figma Plugin API code
+// ---------------------------------------------------------------------------
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.refToVarName = refToVarName;
+exports.safeNodeVar = safeNodeVar;
+exports.importVarName = importVarName;
+exports.emitImports = emitImports;
+exports.tokenVar = tokenVar;
+exports.generateCode = generateCode;
+// ---------------------------------------------------------------------------
+// SAFE NAMING
+// ---------------------------------------------------------------------------
+/**
+ * Convert a token ref like "$spacing/md" to a safe JS variable name.
+ */
+function refToVarName(ref) {
+    const stripped = ref.replace(/^\$/, "");
+    return stripped.replace(/[^a-zA-Z0-9]/g, "_");
+}
+/** Prefix map for node types → variable name prefix. */
+const TYPE_PREFIX = {
+    FRAME: "frame",
+    TEXT: "text",
+    INSTANCE: "inst",
+    CLONE: "clone",
+    RECTANGLE: "rect",
+    ELLIPSE: "ellipse",
+    COMPONENT: "comp",
+    COMPONENT_SET: "compset",
+};
+/**
+ * Build a safe variable name from a node name, with a counter for uniqueness.
+ */
+function safeNodeVar(type, name, counters) {
+    const prefix = TYPE_PREFIX[type] ?? "node";
+    const slug = (name ?? "unnamed")
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replace(/^_|_$/g, "")
+        .toLowerCase();
+    const base = prefix + "_" + slug;
+    const count = (counters.get(base) ?? 0) + 1;
+    counters.set(base, count);
+    return count === 1 ? base : base + "_" + count;
+}
+/**
+ * Build a safe variable name for an import (variable, component, style).
+ */
+function importVarName(entry, seen) {
+    if (seen.has(entry.key))
+        return seen.get(entry.key);
+    const prefix = entry.kind === "variable"
+        ? "var"
+        : entry.kind === "textStyle"
+            ? "style"
+            : entry.kind === "effectStyle"
+                ? "effect"
+                : entry.kind === "component" || entry.kind === "icon" || entry.kind === "logo"
+                    ? "comp"
+                    : "imp";
+    const slug = (entry.ref || entry.name || entry.key)
+        .replace(/^\$/, "")
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replace(/^_|_$/g, "")
+        .toLowerCase();
+    const name = prefix + "_" + slug;
+    seen.set(entry.key, name);
+    return name;
+}
+// ---------------------------------------------------------------------------
+// IMPORT CODE GENERATION
+// ---------------------------------------------------------------------------
+/**
+ * Generate import statements for variables, components, and styles.
+ * `importNames` is mutated to accumulate `key → varName` mappings.
+ * Multiple imports are batched into a single Promise.all for performance.
+ */
+function emitImports(imports, importNames, bridgePrefix) {
+    const bp = bridgePrefix ?? "";
+    const vars = imports.variables ?? [];
+    const comps = imports.components ?? [];
+    const styles = imports.textStyles ?? [];
+    // Build (varName, importExpr) pairs in a stable order. importVarName mutates
+    // importNames (key→varName) — that side-effect must run for every entry.
+    const pairs = [];
+    for (const v of vars) {
+        pairs.push({
+            name: importVarName(v, importNames),
+            expr: "figma.variables.importVariableByKeyAsync(" + JSON.stringify(v.key) + ")",
+        });
+    }
+    for (const c of comps) {
+        const method = c.importMethod ?? "importComponentByKeyAsync";
+        pairs.push({
+            name: importVarName(c, importNames),
+            expr: "figma." + method + "(" + JSON.stringify(c.key) + ")",
+        });
+    }
+    for (const s of styles) {
+        const method = s.importMethod ?? "importStyleByKeyAsync";
+        pairs.push({
+            name: importVarName(s, importNames),
+            expr: "figma." + method + "(" + JSON.stringify(s.key) + ")",
+        });
+    }
+    if (pairs.length === 0)
+        return "";
+    if (pairs.length === 1) {
+        return bp + "var " + pairs[0].name + " = await " + pairs[0].expr + ";";
+    }
+    const names = pairs.map((p) => p.name).join(", ");
+    const exprs = pairs.map((p) => "  " + p.expr).join(",\n");
+    return bp + "var [" + names + "] = await Promise.all([\n" + exprs + ",\n]);";
+}
+// ---------------------------------------------------------------------------
+// RESOLVED TOKEN HELPERS
+// ---------------------------------------------------------------------------
+/**
+ * Get the import variable name for a resolved token object.
+ */
+function tokenVar(token, importNames) {
+    if (!token || typeof token !== "object")
+        return null;
+    const key = token.key;
+    if (typeof key !== "string")
+        return null;
+    return importNames.get(key) ?? null;
+}
+// ---------------------------------------------------------------------------
+// NODE CODE EMITTERS
+// ---------------------------------------------------------------------------
+function emitFrame(node, parentVar, varName, importNames, lines) {
+    lines.push("var " + varName + " = figma.createFrame();");
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Frame") + ";");
+    emitContainerBody(node, varName, importNames, lines);
+    // Rule 1: appendChild FIRST, then FILL sizing
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    // Rule 2: absolute positioning AFTER appendChild
+    emitAbsolute(node, varName, lines);
+}
+/**
+ * Emit everything a container node carries between creation and appendChild:
+ * layout, size, alignment, spacing, decoration and visibility.
+ *
+ * Shared by FRAME and COMPONENT — a master component is structurally a frame,
+ * and the Figma API rules about ordering (resize before sizing modes, bind
+ * variables rather than assign values) apply identically to both.
+ */
+function emitContainerBody(node, varName, importNames, lines) {
+    // Layout mode
+    if (node.layout && node.layout !== "NONE") {
+        lines.push(varName + ".layoutMode = " + JSON.stringify(node.layout) + ";");
+    }
+    // Rule 4: resize() FIRST, then sizing modes
+    if (node.width != null || node.height != null) {
+        const w = node.width != null ? node.width : 100;
+        const h = node.height != null ? node.height : 100;
+        lines.push(varName + ".resize(" + w + ", " + h + ");");
+    }
+    // Sizing modes (after resize — Rule 4)
+    if (node.primaryAxisSizing) {
+        lines.push(varName + ".primaryAxisSizingMode = " + JSON.stringify(node.primaryAxisSizing) + ";");
+    }
+    if (node.counterAxisSizing) {
+        lines.push(varName + ".counterAxisSizingMode = " + JSON.stringify(node.counterAxisSizing) + ";");
+    }
+    // Alignment (Rule 5)
+    if (node.primaryAxisAlign) {
+        lines.push(varName + ".primaryAxisAlignItems = " + JSON.stringify(node.primaryAxisAlign) + ";");
+    }
+    if (node.counterAxisAlign) {
+        lines.push(varName + ".counterAxisAlignItems = " + JSON.stringify(node.counterAxisAlign) + ";");
+    }
+    // Gap — Rule 6: bind via variable
+    if (node.gap) {
+        const gapVar = tokenVar(node.gap, importNames);
+        if (gapVar) {
+            lines.push(varName + ".setBoundVariable('itemSpacing', " + gapVar + ");");
+        }
+    }
+    emitPadding(node, varName, importNames, lines);
+    emitRadius(node, varName, importNames, lines);
+    // Fill — Rule 7
+    if (node.fill) {
+        const fillVar = tokenVar(node.fill, importNames);
+        if (fillVar) {
+            lines.push(varName + ".fills = mf(" + fillVar + ");");
+        }
+    }
+    emitStroke(node, varName, importNames, lines);
+    // Effects
+    if (node.effectStyle) {
+        const effVar = tokenVar(node.effectStyle, importNames);
+        if (effVar) {
+            lines.push("await " + varName + ".setEffectStyleIdAsync(" + effVar + ".id);");
+        }
+    }
+    // Clip
+    if (node.clip != null) {
+        lines.push(varName + ".clipsContent = " + (node.clip ? "true" : "false") + ";");
+    }
+    emitVisibility(node, varName, lines);
+}
+function emitText(node, parentVar, varName, importNames, lines) {
+    lines.push("var " + varName + " = figma.createText();");
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Text") + ";");
+    // Rule 12: characters FIRST
+    lines.push(varName + ".characters = " + JSON.stringify(node.characters ?? "") + ";");
+    // Rule 8: text style via setTextStyleIdAsync (Rule 21: async version)
+    if (node.textStyle) {
+        const styleVar = tokenVar(node.textStyle, importNames);
+        if (styleVar) {
+            lines.push("await " + varName + ".setTextStyleIdAsync(" + styleVar + ".id);");
+        }
+    }
+    // Fill color override — Rule 7
+    if (node.fill) {
+        const fillVar = tokenVar(node.fill, importNames);
+        if (fillVar) {
+            lines.push(varName + ".fills = mf(" + fillVar + ");");
+        }
+    }
+    emitVisibility(node, varName, lines);
+    // Rule 1 + Rule 12: append → FILL → textAutoResize LAST
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    // Rule 12: textAutoResize AFTER append and FILL
+    const autoResize = node.autoResize ?? "HEIGHT";
+    lines.push(varName + ".textAutoResize = " + JSON.stringify(autoResize) + ";");
+    // Truncation
+    if (node.maxLines != null) {
+        lines.push(varName + ".maxLines = " + node.maxLines + ";");
+        lines.push(varName + '.textTruncation = "ENDING";');
+    }
+    emitAbsolute(node, varName, lines);
+}
+function emitInstance(node, parentVar, varName, importNames, lines) {
+    const comp = node._resolvedComponent;
+    if (!comp) {
+        lines.push('// WARN: unresolved component "' + (node.component ?? "?") + '"');
+        return;
+    }
+    const compVar = importNames.get(comp.key);
+    if (!compVar) {
+        lines.push('// WARN: no import found for component "' + comp.name + '"');
+        return;
+    }
+    if (comp.type === "COMPONENT_SET" || comp.importMethod === "importComponentSetByKeyAsync") {
+        // Build variant find expression
+        if (node.variant && Object.keys(node.variant).length > 0) {
+            const variantParts = Object.keys(node.variant).map((k) => k + "=" + node.variant[k]);
+            const findExpr = variantParts.join(", ");
+            lines.push("var target_" +
+                varName +
+                " = " +
+                compVar +
+                ".findChild(function(n) { return n.name === " +
+                JSON.stringify(findExpr) +
+                "; });");
+            lines.push("var " +
+                varName +
+                " = (target_" +
+                varName +
+                " || " +
+                compVar +
+                ".defaultVariant).createInstance();");
+        }
+        else {
+            lines.push("var " + varName + " = " + compVar + ".defaultVariant.createInstance();");
+        }
+    }
+    else {
+        lines.push("var " + varName + " = " + compVar + ".createInstance();");
+    }
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Instance") + ";");
+    emitVisibility(node, varName, lines);
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    emitAbsolute(node, varName, lines);
+    // Rule 9/10: property overrides via findPropKey
+    if (node.properties && Object.keys(node.properties).length > 0) {
+        const compSetVar = comp.type === "COMPONENT_SET" || comp.importMethod === "importComponentSetByKeyAsync"
+            ? compVar
+            : null;
+        emitPropertyOverrides(node.properties, varName, compSetVar, lines);
+    }
+    // Rule 9d: instance swaps
+    if (node._resolvedSwaps) {
+        emitInstanceSwaps(node._resolvedSwaps, varName, importNames, lines);
+    }
+    // Deep overrides — the only way to reach content a component does not expose
+    // as a property (a table's cells, a rail's items). This writes ordinary Figma
+    // overrides: the instance keeps its link to the master. It is NOT a licence to
+    // rebuild a DS component out of atoms.
+    if (node.overrides && node.overrides.length > 0) {
+        emitOverrides(node.overrides, varName, importNames, lines);
+    }
+}
+function emitClone(node, parentVar, varName, importNames, lines, localRefs) {
+    // Rule 22: clone pattern
+    if (node.sourceRef && localRefs.has(node.sourceRef)) {
+        const srcVar = localRefs.get(node.sourceRef);
+        lines.push("var " + varName + " = " + srcVar + ".clone();");
+    }
+    else if (node.sourceNodeId) {
+        const srcVar = "src_" + varName;
+        lines.push("var " +
+            srcVar +
+            " = await figma.getNodeByIdAsync(" +
+            JSON.stringify(node.sourceNodeId) +
+            ");");
+        lines.push("var " + varName + " = " + srcVar + ".clone();");
+    }
+    else {
+        lines.push("// WARN: CLONE node has no source");
+        return;
+    }
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Clone") + ";");
+    emitVisibility(node, varName, lines);
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    emitAbsolute(node, varName, lines);
+    if (node.overrides && node.overrides.length > 0) {
+        emitOverrides(node.overrides, varName, importNames, lines);
+    }
+}
+function emitRectangle(node, parentVar, varName, importNames, lines) {
+    lines.push("var " + varName + " = figma.createRectangle();");
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Rectangle") + ";");
+    if (node.width != null || node.height != null) {
+        const w = node.width != null ? node.width : 100;
+        const h = node.height != null ? node.height : 100;
+        lines.push(varName + ".resize(" + w + ", " + h + ");");
+    }
+    if (node.fill) {
+        const fillVar = tokenVar(node.fill, importNames);
+        if (fillVar) {
+            lines.push(varName + ".fills = mf(" + fillVar + ");");
+        }
+    }
+    emitRadius(node, varName, importNames, lines);
+    emitStroke(node, varName, importNames, lines);
+    emitVisibility(node, varName, lines);
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    emitAbsolute(node, varName, lines);
+}
+function emitEllipse(node, parentVar, varName, importNames, lines) {
+    lines.push("var " + varName + " = figma.createEllipse();");
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Ellipse") + ";");
+    if (node.width != null || node.height != null) {
+        const w = node.width != null ? node.width : 100;
+        const h = node.height != null ? node.height : 100;
+        lines.push(varName + ".resize(" + w + ", " + h + ");");
+    }
+    if (node.fill) {
+        const fillVar = tokenVar(node.fill, importNames);
+        if (fillVar) {
+            lines.push(varName + ".fills = mf(" + fillVar + ");");
+        }
+    }
+    emitStroke(node, varName, importNames, lines);
+    emitVisibility(node, varName, lines);
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    emitAbsolute(node, varName, lines);
+}
+// ---------------------------------------------------------------------------
+// MASTER COMPONENT EMITTERS
+// ---------------------------------------------------------------------------
+/**
+ * Variant node names are the matrix coordinates Figma stores a component set
+ * by: `prop=value, prop2=value2`. The order follows the axis declaration on
+ * the set, not the authoring order of `variantValues`, so the same variant
+ * always produces the same name.
+ */
+function variantName(variantValues, axisOrder) {
+    if (!variantValues)
+        return null;
+    const parts = axisOrder
+        .filter((axis) => variantValues[axis] !== undefined)
+        .map((axis) => axis + "=" + variantValues[axis]);
+    return parts.length > 0 ? parts.join(", ") : null;
+}
+/**
+ * Emit a master component. `explicitName` overrides the node name, which the
+ * component-set path uses to impose the `prop=value` variant naming.
+ */
+function emitComponent(node, parentVar, varName, importNames, counters, localRefs, lines, explicitName) {
+    lines.push("var " + varName + " = figma.createComponent();");
+    lines.push(varName + ".name = " + JSON.stringify(explicitName ?? node.name ?? "Component") + ";");
+    emitContainerBody(node, varName, importNames, lines);
+    if (node.description) {
+        lines.push(varName + ".description = " + JSON.stringify(node.description) + ";");
+    }
+    lines.push(parentVar + ".appendChild(" + varName + ");");
+    emitFillSizing(node, varName, lines);
+    emitAbsolute(node, varName, lines);
+    if (Array.isArray(node.children) && node.children.length > 0) {
+        walkAndEmit(node.children, varName, importNames, counters, localRefs, lines);
+    }
+}
+/**
+ * Emit the `addComponentProperty` calls for a master, plus the layer bindings
+ * that make each property actually drive something.
+ *
+ * Figma returns a suffixed key (`label#12:3`) from `addComponentProperty`, and
+ * `componentPropertyReferences` must use that exact key — hence the round-trip
+ * through a local variable rather than reusing the plain property name.
+ */
+function emitComponentProperties(node, ownerVar, bindTargetVar, lines) {
+    const props = node.componentProperties;
+    if (!Array.isArray(props) || props.length === 0)
+        return;
+    for (const prop of props) {
+        if (!prop || !prop.name || !prop.type)
+            continue;
+        const keyVar = "cp_" + ownerVar + "_" + prop.name.replace(/[^a-zA-Z0-9]/g, "_");
+        const defaultValue = prop.default !== undefined
+            ? JSON.stringify(prop.default)
+            : prop.type === "BOOLEAN"
+                ? "true"
+                : '""';
+        lines.push("var " +
+            keyVar +
+            " = " +
+            ownerVar +
+            ".addComponentProperty(" +
+            JSON.stringify(prop.name) +
+            ", " +
+            JSON.stringify(prop.type) +
+            ", " +
+            defaultValue +
+            ");");
+        if (!prop.bindTo || !prop.bindTo.layer)
+            continue;
+        // Default the driven aspect from the property type: a TEXT property drives
+        // characters, a BOOLEAN drives visibility, an INSTANCE_SWAP drives the
+        // nested main component.
+        const field = prop.bindTo.field ??
+            (prop.type === "TEXT" ? "characters" : prop.type === "BOOLEAN" ? "visible" : "mainComponent");
+        const targetVar = "bt_" + keyVar;
+        lines.push("var " +
+            targetVar +
+            " = " +
+            bindTargetVar +
+            ".findOne(function(n) { return n.name === " +
+            JSON.stringify(prop.bindTo.layer) +
+            "; });");
+        lines.push("if (" +
+            targetVar +
+            ") " +
+            targetVar +
+            ".componentPropertyReferences = { " +
+            field +
+            ": " +
+            keyVar +
+            " };");
+        lines.push("else console.warn('bridge: property " +
+            prop.name.replace(/'/g, "\\'") +
+            " has no layer named " +
+            prop.bindTo.layer.replace(/'/g, "\\'") +
+            "');");
+    }
+}
+/**
+ * Emit a component set: every variant as its own master, then a single
+ * `combineAsVariants` call.
+ *
+ * Ordering is forced by the Figma API — the components must exist and be
+ * parented before they can be combined, and the set does not exist as a node
+ * until the combine returns, so its name, description and properties can only
+ * be set afterwards.
+ */
+function emitComponentSet(node, parentVar, varName, importNames, counters, localRefs, lines) {
+    const axes = Array.isArray(node.variantProperties) ? node.variantProperties : [];
+    const axisOrder = axes.map((a) => a.name);
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (children.length === 0) {
+        lines.push('// WARN: COMPONENT_SET "' + (node.name ?? "?") + '" has no variants');
+        return;
+    }
+    const variantVars = [];
+    for (const child of children) {
+        if (!child || child.type !== "COMPONENT")
+            continue;
+        const childVar = safeNodeVar("COMPONENT", child.name, counters);
+        variantVars.push(childVar);
+        if (child.id)
+            localRefs.set(child.id, childVar);
+        emitComponent(child, parentVar, childVar, importNames, counters, localRefs, lines, variantName(child.variantValues, axisOrder) ?? child.name);
+    }
+    if (variantVars.length === 0) {
+        lines.push('// WARN: COMPONENT_SET "' + (node.name ?? "?") + '" produced no COMPONENT children');
+        return;
+    }
+    lines.push("var " +
+        varName +
+        " = figma.combineAsVariants([" +
+        variantVars.join(", ") +
+        "], " +
+        parentVar +
+        ");");
+    lines.push(varName + ".name = " + JSON.stringify(node.name ?? "Component Set") + ";");
+    if (node.description) {
+        lines.push(varName + ".description = " + JSON.stringify(node.description) + ";");
+    }
+    // Non-variant properties live on the set; their layer bindings resolve
+    // against the first variant, which every variant shares by construction.
+    emitComponentProperties(node, varName, variantVars[0], lines);
+}
+// ---------------------------------------------------------------------------
+// SHARED EMITTERS
+// ---------------------------------------------------------------------------
+function emitFillSizing(node, varName, lines) {
+    if (node.fillH) {
+        lines.push(varName + '.layoutSizingHorizontal = "FILL";');
+    }
+    if (node.fillV) {
+        lines.push(varName + '.layoutSizingVertical = "FILL";');
+    }
+}
+function emitAbsolute(node, varName, lines) {
+    if (node.absolute) {
+        lines.push(varName + '.layoutPositioning = "ABSOLUTE";');
+        if (node.absolute.x != null) {
+            lines.push(varName + ".x = " + node.absolute.x + ";");
+        }
+        if (node.absolute.y != null) {
+            lines.push(varName + ".y = " + node.absolute.y + ";");
+        }
+    }
+}
+function emitVisibility(node, varName, lines) {
+    if (node.visible === false) {
+        lines.push(varName + ".visible = false;");
+    }
+    if (node.opacity != null && node.opacity !== 1) {
+        lines.push(varName + ".opacity = " + node.opacity + ";");
+    }
+}
+function emitPadding(node, varName, importNames, lines) {
+    // Shorthand: padding → all four sides
+    if (node.padding) {
+        const pVar = tokenVar(node.padding, importNames);
+        if (pVar) {
+            lines.push("bindPadding(" + varName + ", " + pVar + ", " + pVar + ", " + pVar + ", " + pVar + ");");
+            return;
+        }
+    }
+    const top = node.paddingTop ? tokenVar(node.paddingTop, importNames) : null;
+    const right = node.paddingRight ? tokenVar(node.paddingRight, importNames) : null;
+    const bottom = node.paddingBottom ? tokenVar(node.paddingBottom, importNames) : null;
+    const left = node.paddingLeft ? tokenVar(node.paddingLeft, importNames) : null;
+    if (top || right || bottom || left) {
+        lines.push("bindPadding(" +
+            varName +
+            ", " +
+            (top ?? "null") +
+            ", " +
+            (right ?? "null") +
+            ", " +
+            (bottom ?? "null") +
+            ", " +
+            (left ?? "null") +
+            ");");
+    }
+}
+function emitRadius(node, varName, importNames, lines) {
+    if (node.radius) {
+        const rVar = tokenVar(node.radius, importNames);
+        if (rVar) {
+            lines.push("bindRadius(" + varName + ", " + rVar + ");");
+            return;
+        }
+    }
+    const tl = node.radiusTopLeft ? tokenVar(node.radiusTopLeft, importNames) : null;
+    const tr = node.radiusTopRight ? tokenVar(node.radiusTopRight, importNames) : null;
+    const bl = node.radiusBottomLeft ? tokenVar(node.radiusBottomLeft, importNames) : null;
+    const br = node.radiusBottomRight ? tokenVar(node.radiusBottomRight, importNames) : null;
+    if (tl)
+        lines.push(varName + '.setBoundVariable("topLeftRadius", ' + tl + ");");
+    if (tr)
+        lines.push(varName + '.setBoundVariable("topRightRadius", ' + tr + ");");
+    if (bl)
+        lines.push(varName + '.setBoundVariable("bottomLeftRadius", ' + bl + ");");
+    if (br)
+        lines.push(varName + '.setBoundVariable("bottomRightRadius", ' + br + ");");
+}
+function emitStroke(node, varName, importNames, lines) {
+    if (!node.stroke)
+        return;
+    const strokeVar = tokenVar(node.stroke, importNames);
+    if (!strokeVar)
+        return;
+    lines.push(varName + ".strokes = mf(" + strokeVar + ");");
+    lines.push(varName + ".strokeWeight = " + (node.strokeWeight ?? 1) + ";");
+    lines.push(varName + ".strokeAlign = " + JSON.stringify(node.strokeAlign ?? "INSIDE") + ";");
+}
+function emitPropertyOverrides(properties, instVar, compSetVar, lines) {
+    const keys = Object.keys(properties);
+    if (!keys.length)
+        return;
+    if (compSetVar) {
+        for (const propName of keys) {
+            const value = properties[propName];
+            const propType = typeof value === "boolean" ? "BOOLEAN" : "TEXT";
+            const valStr = typeof value === "boolean" ? String(value) : JSON.stringify(value);
+            const keyVar = "k_" + propName.replace(/[^a-zA-Z0-9]/g, "_");
+            lines.push("var " +
+                keyVar +
+                " = findPropKey(" +
+                compSetVar +
+                ", " +
+                JSON.stringify(propName) +
+                ", " +
+                JSON.stringify(propType) +
+                ");");
+            lines.push("if (" + keyVar + ") " + instVar + ".setProperties({ [" + keyVar + "]: " + valStr + " });");
+        }
+    }
+    else {
+        const propsObj = {};
+        for (const propName of keys) {
+            propsObj[propName] = properties[propName];
+        }
+        lines.push(instVar + ".setProperties(" + JSON.stringify(propsObj) + ");");
+    }
+}
+function emitInstanceSwaps(resolvedSwaps, instVar, importNames, lines) {
+    const keys = Object.keys(resolvedSwaps);
+    for (const slotName of keys) {
+        const swap = resolvedSwaps[slotName];
+        const swapCompVar = importNames.get(swap.key);
+        if (!swapCompVar)
+            continue;
+        const slotKeyVar = "sk_" + slotName.replace(/[^a-zA-Z0-9]/g, "_");
+        lines.push("var " +
+            slotKeyVar +
+            " = findPropKey(" +
+            instVar +
+            ", " +
+            JSON.stringify(slotName) +
+            ', "INSTANCE_SWAP");');
+        lines.push("if (" +
+            slotKeyVar +
+            ") " +
+            instVar +
+            ".setProperties({ [" +
+            slotKeyVar +
+            "]: " +
+            swapCompVar +
+            ".id });");
+    }
+}
+function emitOverrides(overrides, hostVar, importNames, lines) {
+    // One scan per distinct predicate, not one per override: filling a table means
+    // a dozen overrides against the same layer name, and findAll walks the whole
+    // instance subtree (am-table is ~3 000 nodes).
+    const scanVars = new Map();
+    for (let i = 0; i < overrides.length; i++) {
+        const ov = overrides[i];
+        const find = ov.find;
+        const set = ov.set;
+        if (!find || !set)
+            continue;
+        const ovVar = "ov_" + i + "_" + hostVar;
+        const findParts = ["n.name === " + JSON.stringify(find.name)];
+        if (find.type) {
+            findParts.push("n.type === " + JSON.stringify(find.type));
+        }
+        const predicate = "function(n) { return " + findParts.join(" && ") + "; }";
+        if (typeof find.nth === "number") {
+            // Repeated layer names are the NORM inside a DS component — five cells all
+            // named am-table-cell-value, six items all named am-rail-item. findOne
+            // would silently write to the first one every time.
+            let scanVar = scanVars.get(predicate);
+            if (!scanVar) {
+                scanVar = "scan_" + scanVars.size + "_" + hostVar;
+                scanVars.set(predicate, scanVar);
+                lines.push("var " + scanVar + " = " + hostVar + ".findAll(" + predicate + ");");
+            }
+            lines.push("var " + ovVar + " = " + scanVar + "[" + find.nth + "] || null;");
+        }
+        else {
+            lines.push("var " + ovVar + " = " + hostVar + ".findOne(" + predicate + ");");
+        }
+        const guard = "if (" + ovVar + ") ";
+        if (set.characters != null) {
+            lines.push(guard + "await setChars(" + ovVar + ", " + JSON.stringify(set.characters) + ");");
+        }
+        if (set.fill) {
+            const fillVar = tokenVar(set.fill, importNames);
+            if (fillVar) {
+                lines.push(guard + ovVar + ".fills = mf(" + fillVar + ");");
+            }
+        }
+        if (set.visible != null) {
+            lines.push(guard + ovVar + ".visible = " + (set.visible ? "true" : "false") + ";");
+        }
+        if (set.properties) {
+            const propStr = JSON.stringify(set.properties);
+            lines.push(guard + ovVar + ".setProperties(" + propStr + ");");
+        }
+    }
+}
+// ---------------------------------------------------------------------------
+// TREE WALKER
+// ---------------------------------------------------------------------------
+function walkAndEmit(nodes, parentVar, importNames, counters, localRefs, lines) {
+    if (!Array.isArray(nodes))
+        return;
+    for (const node of nodes) {
+        if (!node || !node.type)
+            continue;
+        const varName = safeNodeVar(node.type, node.name, counters);
+        if (node.id) {
+            localRefs.set(node.id, varName);
+        }
+        switch (node.type) {
+            case "FRAME":
+                emitFrame(node, parentVar, varName, importNames, lines);
+                if (Array.isArray(node.children) && node.children.length > 0) {
+                    walkAndEmit(node.children, varName, importNames, counters, localRefs, lines);
+                }
+                break;
+            case "TEXT":
+                emitText(node, parentVar, varName, importNames, lines);
+                break;
+            case "INSTANCE":
+                emitInstance(node, parentVar, varName, importNames, lines);
+                // Rule 14: no children on instances
+                break;
+            case "CLONE":
+                emitClone(node, parentVar, varName, importNames, lines, localRefs);
+                break;
+            case "RECTANGLE":
+                emitRectangle(node, parentVar, varName, importNames, lines);
+                break;
+            case "ELLIPSE":
+                emitEllipse(node, parentVar, varName, importNames, lines);
+                break;
+            case "COMPONENT":
+                emitComponent(node, parentVar, varName, importNames, counters, localRefs, lines);
+                emitComponentProperties(node, varName, varName, lines);
+                break;
+            case "COMPONENT_SET":
+                emitComponentSet(node, parentVar, varName, importNames, counters, localRefs, lines);
+                break;
+            default:
+                lines.push('// WARN: unknown node type "' + String(node.type) + '"');
+                break;
+        }
+        lines.push(""); // blank line between nodes
+    }
+}
+/**
+ * Emit a root frame that is placed to the right of any existing page content,
+ * never hardcoded at (0,0). Shared by preload and single-chunk emitters.
+ */
+function emitRootFrame(lines, context) {
+    const rootName = context.rootName ?? "Root";
+    const rootWidth = context.rootWidth ?? 1440;
+    const rootHeight = context.rootHeight ?? 900;
+    lines.push("// ── ROOT FRAME ──");
+    lines.push("var __bridgeMaxX = 0;");
+    lines.push("for (var __i = 0; __i < figma.currentPage.children.length; __i++) {");
+    lines.push("  var __c = figma.currentPage.children[__i];");
+    lines.push("  if (__c.x + __c.width > __bridgeMaxX) __bridgeMaxX = __c.x + __c.width;");
+    lines.push("}");
+    lines.push("var root = figma.createFrame();");
+    lines.push("root.name = " + JSON.stringify(rootName) + ";");
+    lines.push("root.resize(" + rootWidth + ", " + rootHeight + ");");
+    lines.push('root.layoutMode = "VERTICAL";');
+    lines.push('root.primaryAxisSizingMode = "AUTO";');
+    lines.push('root.counterAxisSizingMode = "FIXED";');
+    lines.push("figma.currentPage.appendChild(root);");
+    lines.push("root.x = __bridgeMaxX === 0 ? 0 : __bridgeMaxX + 100;");
+    lines.push("root.y = 0;");
+}
+function emitPreloadChunk(chunk, context) {
+    const lines = [];
+    const importNames = new Map();
+    lines.push("// ── PRELOAD ──");
+    lines.push("globalThis.__bridge = {};");
+    lines.push("");
+    const importCode = emitImports(chunk.imports, importNames, "");
+    if (importCode) {
+        lines.push("// ── IMPORTS ──");
+        lines.push(importCode);
+        lines.push("");
+    }
+    lines.push("// ── STORE ON BRIDGE ──");
+    importNames.forEach((varName) => {
+        lines.push("globalThis.__bridge." + varName + " = " + varName + ";");
+    });
+    lines.push("");
+    emitRootFrame(lines, context);
+    lines.push("globalThis.__bridge.root = root;");
+    return lines.join("\n");
+}
+function emitBuildChunk(chunk, context) {
+    const lines = [];
+    const importNames = new Map();
+    const counters = new Map();
+    const localRefs = new Map();
+    lines.push("// ── BUILD CHUNK " + chunk.index + " ──");
+    lines.push("var b = globalThis.__bridge;");
+    lines.push("var root = b.root;");
+    lines.push("");
+    // Reconstruct the import variable names from context.allImports.
+    if (context.allImports) {
+        const allImps = context.allImports;
+        const vars = allImps.variables ?? [];
+        const comps = allImps.components ?? [];
+        const styles = allImps.textStyles ?? [];
+        for (const v of vars) {
+            const vn = importVarName(v, importNames);
+            lines.push("var " + vn + " = b." + vn + ";");
+        }
+        for (const c of comps) {
+            const vn = importVarName(c, importNames);
+            lines.push("var " + vn + " = b." + vn + ";");
+        }
+        for (const s of styles) {
+            const vn = importVarName(s, importNames);
+            lines.push("var " + vn + " = b." + vn + ";");
+        }
+        lines.push("");
+    }
+    lines.push("// ── NODES ──");
+    walkAndEmit(chunk.nodes, "root", importNames, counters, localRefs, lines);
+    return lines.join("\n");
+}
+// ---------------------------------------------------------------------------
+// SINGLE CHUNK EMITTER
+// ---------------------------------------------------------------------------
+function emitSingleChunk(chunk, context) {
+    const lines = [];
+    const importNames = new Map();
+    const counters = new Map();
+    const localRefs = new Map();
+    const importCode = emitImports(chunk.imports, importNames, "");
+    if (importCode) {
+        lines.push("// ── IMPORTS ──");
+        lines.push(importCode);
+        lines.push("");
+    }
+    emitRootFrame(lines, context);
+    lines.push("");
+    lines.push("// ── BUILD ──");
+    walkAndEmit(chunk.nodes, "root", importNames, counters, localRefs, lines);
+    return lines.join("\n");
+}
+// ---------------------------------------------------------------------------
+// PUBLIC API
+// ---------------------------------------------------------------------------
+/**
+ * Generate Figma Plugin API JavaScript code from a resolved chunk.
+ */
+function generateCode(chunk, context) {
+    const ctx = context ?? {};
+    if (ctx.isMultiChunk && chunk.label === "preload") {
+        return emitPreloadChunk(chunk, ctx);
+    }
+    if (ctx.isMultiChunk && chunk.label !== "preload") {
+        return emitBuildChunk(chunk, ctx);
+    }
+    return emitSingleChunk(chunk, ctx);
+}
+//# sourceMappingURL=codegen.js.map
